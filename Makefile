@@ -2,15 +2,21 @@
 SHELL := /bin/bash
 TF    := terraform -chdir=terraform/envs/local
 
-.PHONY: local-up local-down tf-local-apply tf-local-destroy dns demo demo-load test
+.PHONY: local-up local-down llm-up tf-local-apply tf-local-destroy dns demo demo-load scale test
 
-local-up:          ## emulator + observability
+local-up:                      ## emulator + observability
 	docker compose up -d ministack redis jaeger
 	@until [ "$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:4566/_ministack/health)" = 200 ]; do sleep 1; done
 	@echo "ministack ready on :4566"
 
 local-down:
 	docker compose down
+
+# Optional: real LLM prose locally instead of Ministack's canned mock reply.
+llm-up:
+	docker compose --profile llm up -d ollama
+	docker compose exec ollama ollama pull llama3.2:1b
+	docker compose restart ministack
 
 tf-local-apply:
 	$(TF) init -upgrade
@@ -19,16 +25,20 @@ tf-local-apply:
 tf-local-destroy:
 	$(TF) destroy -auto-approve
 
-# Ministack stores Cloud Map registrations but serves no DNS (PLAN.md §8 finding 3).
+# Ministack stores Cloud Map registrations but serves no DNS (SPEC.md 14.1).
 # Bridge it with docker network aliases: service discovery IS just DNS.
+# Aliases EVERY task, not just the first - docker's embedded DNS returns all A
+# records for a shared alias, which is what makes the local load-balancing demo
+# possible at all.
 dns:
 	@docker network create ecom-dns >/dev/null 2>&1 || true
 	@for svc in identityd paymentd; do \
-		cid=$$(docker ps --filter "name=ministack-ecs-" --filter "name=$$svc" -q | head -1); \
-		if [ -n "$$cid" ]; then \
+		cids=$$(docker ps --filter "name=ministack-ecs-" --filter "name=$$svc" -q); \
+		if [ -z "$$cids" ]; then echo "no running task for $$svc"; continue; fi; \
+		for cid in $$cids; do \
 			docker network connect --alias $$svc.ecom.local ecom-dns $$cid 2>/dev/null \
-				&& echo "aliased $$svc.ecom.local" || echo "$$svc already aliased"; \
-		else echo "no running task for $$svc"; fi; \
+				&& echo "aliased $$svc.ecom.local -> $$cid" || true; \
+		done; \
 	done
 
 test:
@@ -38,12 +48,12 @@ test:
 demo:
 	go run ./cmd/demo-client -mode=once
 
+# Authenticates as a SEEDED user, never a freshly registered one: a Register'd
+# user exists on exactly one identityd task (SPEC.md 6.4).
 demo-load:
 	go run ./cmd/demo-client -mode=load
 
-# Optional: real LLM text locally. Without this, Bedrock Converse returns
-# Ministack's canned mock reply -- correct API shape, placeholder text.
-llm-up:
-	docker compose --profile llm up -d ollama
-	docker compose exec ollama ollama pull llama3.2:1b
-	docker compose restart ministack
+scale:
+	aws --endpoint-url http://localhost:4566 ecs update-service \
+		--cluster ecom-local --service identityd --desired-count $(N)
+	$(MAKE) dns
