@@ -1,8 +1,8 @@
 name: ecomgrpc
 
-# Local AWS emulator + observability. Postgres is NOT here on purpose:
-# it comes from `terraform apply` via Ministack's RDS (real postgres containers),
-# so the terraform modules stay identical between local and AWS.
+# Local AWS emulator + observability.
+# No database service here: each service embeds SQLite on its own task filesystem
+# (see SPEC.md section 6). The RDS path is kept in terraform but not applied.
 services:
   ministack:
     image: ministackorg/ministack:latest
@@ -18,7 +18,6 @@ services:
       - LOG_LEVEL=INFO
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - RDS_BASE_PORT=15432
       # Put ECS tasks + RDS containers on the same network as jaeger/prometheus,
       # otherwise a task cannot reach jaeger:4317.
       - DOCKER_NETWORK=ecom-local

@@ -1,3 +1,7 @@
+> **SUPERSEDED by `../SPEC.md`** wherever the two disagree. Kept for the research trail; it still
+> names RDS as the database and carries the pre-SQLite day plan.
+
+
 # Go gRPC on ECS — talk rebuild plan
 
 **Talk:** Running Go gRPC Services on ECS: From LocalStack to Production Cloud

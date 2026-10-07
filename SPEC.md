@@ -241,6 +241,13 @@ databases. That is not hidden; it shapes the design:
 | Service | DB | Tasks | Consequence |
 |---|---|---|---|
 | `identityd` | **baked into the image at build time**, seeded with demo users | **3** | every task has a byte-identical DB, so all *read* paths (`Login`, `VerifyToken`) behave identically → **the load-balancing demo works perfectly**. `Register` writes only to the task that served it, and is explicitly non-persistent. |
+
+> **Demo-flow rule, do not violate:** anything run at `identityd` N>1 must authenticate as a
+> **seeded** user. A user created by `Register` exists on exactly one task, so after scale-out two
+> of three tasks will fail `VerifyToken` for them — which looks exactly like the load-balancing fix
+> not working, and would wreck the §11.2 segment. `make demo-load` therefore always logs in as a
+> seeded user. `Register` is demonstrated only at N=1, or shown deliberately at N=3 as "watch this
+> *not* survive scale-out" — a fine lesson, but announce which one you are doing.
 | `paymentd` | task-local, writable | **1** | authorizations persist for the life of the task and vanish when it is replaced |
 
 **This is a feature, not a compromise.** The closing beat of the talk:
@@ -250,6 +257,16 @@ databases. That is not hidden; it shapes the design:
 
 The `rds` Terraform module is written and kept, **not applied by default**, so flipping
 `DB_DRIVER=postgres` is a 30-second finale if time allows.
+
+### 6.4a Two implementation details that will bite otherwise
+
+- **File ownership.** The runtime image is `distroless/static:nonroot`. The baked SQLite file must be
+  `COPY --chown=nonroot:nonroot`, and its **directory** must be writable — SQLite needs to create
+  `-journal`/`-wal` siblings, so a writable file in a read-only directory still fails with
+  `attempt to write a readonly database`.
+- **Prometheus needs service discovery**, not static targets: task IPs are assigned at runtime.
+  Locally use `docker_sd_configs` (the Docker socket is already mounted); on AWS use
+  `dns_sd_configs` against `identityd.ecom.local`. Acceptance criterion 4 depends on this.
 
 ### 6.5 Driver abstraction
 
@@ -261,7 +278,9 @@ The `rds` Terraform module is written and kept, **not applied by default**, so f
 With `identityd` on 3 tasks, **all three must share one `JWT_SECRET`**, or a token minted by task A
 fails verification on task B and the demo breaks intermittently and confusingly. The secret comes
 from **Secrets Manager** (AWS) / Ministack Secrets Manager (local), injected via the task
-definition's `secrets` block — never baked into the image, never per-task. This is the concrete
+definition's `secrets` block — never baked into the image, never per-task. **Verified ✅: Ministack's
+ECS resolves `secrets[].valueFrom` against its Secrets Manager, so the local and AWS paths are
+identical here** — no emulator gap, and the Secrets Manager segment demos locally. This is the concrete
 motivation for the Secrets Manager section rather than a bolted-on aside.
 
 ### 6.7 Schema
@@ -303,7 +322,8 @@ grpc-ecs-payments/
 │   ├── Dockerfile.identityd    # includes `seed` step that bakes the SQLite file
 │   └── Dockerfile.paymentd
 ├── terraform/
-│   ├── modules/{network,ecr,ecs-cluster,ecs-service,secrets,alb,rds,observability}
+│   ├── modules/{network,ecr,ecs-cluster,ecs-service,secrets,observability}
+│   │                              # + alb, rds — both ABOVE the cut line (§15.1)
 │   └── envs/{local,aws}/
 ├── compose.yaml                # ministack + redis + jaeger + prometheus [+ ollama profile]
 ├── Makefile
@@ -331,6 +351,10 @@ grpc-ecs-payments/
 | base image | pinned `distroless/static:nonroot`, `TARGETARCH` | `alpine:latest`, hardcoded amd64, root |
 
 Target **arm64/Graviton**: cheaper on Fargate and native on the speaker's M-series laptop (no QEMU).
+**Verified ✅ Fargate Spot supports ARM64** (GA since Oct 2024, Fargate platform version **1.4.0+**,
+all commercial regions, up to ~70% off). So `cpu_architecture = ARM64` + `FARGATE_SPOT` is a valid
+combination and the `ecs-service` module needs no per-service capacity-provider special-casing —
+the "byte-identical modules" claim holds without an asterisk.
 
 ---
 
@@ -371,7 +395,7 @@ Known local gaps, with the agreed workaround:
 
 | Gap | Workaround |
 |---|---|
-| Cloud Map stores registrations but serves **no DNS** ✅ | `make dns` adds Docker network aliases — service discovery *is* just DNS. Verified resolving. |
+| Cloud Map stores registrations but serves **no DNS** ✅ | `make dns` adds Docker network aliases — service discovery *is* just DNS. Verified resolving. **Must alias every task, not one**: Docker's embedded DNS returns all A records for a shared alias, which is what makes the local §11.2 demo possible. |
 | `awsvpc` tasks have **no host port** ✅ | correct AWS behaviour; `demo-client` runs as a container on the task network |
 | ECS Service Connect / Envoy not emulated | that comparison is AWS-only |
 | Bedrock text is a deterministic mock | optional Ollama proxy above |
@@ -398,6 +422,15 @@ Known local gaps, with the agreed workaround:
 - **11.6 `buf breaking`** rejecting a renamed field — the strongest argument for Protobuf, and
   impossible to show with raw `protoc`.
 - **11.7 Stateless vs stateful on ECS** — §6.4, delivered by killing the `paymentd` task.
+
+### How the laptop reaches the AWS deployment
+
+ALB is blocked on ACM and sits above the cut line, so `make demo AWS=1` needs another path.
+**Decision: `paymentd` runs in a public subnet with `assign_public_ip = true` and a security group
+allowing :50052 from the speaker's IP only.** `identityd` stays private — only `paymentd` calls it,
+over Cloud Map. This also avoids a NAT Gateway (§ cost guardrails). The alternative, running
+`demo-client` as a one-off `run-task` in-VPC, is more faithful but gives no live terminal output,
+so it is the fallback if the venue IP is unpredictable.
 
 ### ⚠️ Blocker to resolve before the talk
 
@@ -438,8 +471,10 @@ every image tag. Pre-pull images the morning of. Keep a screen recording and a s
 2. `go test ./...` passes offline.
 3. `make local-up && make tf-local-apply && make dns && make demo` yields an approved **and** a
    declined authorization, with the decline explained in prose.
-4. `make demo-load` with `identityd` at 3 tasks shows traffic on **one** task before the fix and
-   spread across three after — visible in Prometheus.
+4. `make demo-load` (authenticating as a **seeded** user — see §6.4) with `identityd` at 3 tasks
+   shows traffic on **one** task before the fix and spread across all three after, visible in
+   Prometheus via service discovery. Requires `make dns` to have aliased **every** identityd task,
+   not just the first.
 5. Killing the `identityd` task mid-load drops **zero** in-flight RPCs (graceful shutdown works).
 6. `terraform plan` in `envs/aws` succeeds, and its module set is byte-identical to `envs/local`.
 7. One Jaeger trace shows `paymentd.Authorize` → `identityd.VerifyToken` as parent/child spans.
@@ -483,6 +518,14 @@ Vitess 9 / 4 · Thanos 4 / 1 · **Envoy xDS 2 / 2 (100%)** · **OTLP 1 / 0**.
 Conclusion: gRPC is chosen for a **typed, versioned, polyglot contract on internal traffic**;
 streaming is a capability for specific cases (config push, watch, blob transfer). Not one of the 14
 is a public consumer API.
+
+---
+
+## 14.4 Note on `docs/PLAN.md`
+
+That file is the working document from the design phase and is **superseded by this spec** wherever
+they disagree — in particular it still names RDS as the database and carries the pre-SQLite day
+plan. It is kept only for the research trail; `docs/evidence/` holds the 14 projects' protos.
 
 ---
 
