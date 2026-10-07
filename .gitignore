@@ -1,0 +1,9 @@
+# local state
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+*.env
+.env
+data/
+*.db

@@ -1,0 +1,79 @@
+name: ecomgrpc
+
+# Local AWS emulator + observability. Postgres is NOT here on purpose:
+# it comes from `terraform apply` via Ministack's RDS (real postgres containers),
+# so the terraform modules stay identical between local and AWS.
+services:
+  ministack:
+    image: ministackorg/ministack:latest
+    container_name: ministack
+    ports:
+      - "4566:4566"
+      # NOTE: do NOT publish the RDS port range here. Ministack starts each RDS
+      # instance as its own Postgres container that binds its host port directly;
+      # claiming the range on this container makes CreateDBInstance fail with
+      # "port is already allocated".
+    environment:
+      - GATEWAY_PORT=4566
+      - LOG_LEVEL=INFO
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RDS_BASE_PORT=15432
+      # Put ECS tasks + RDS containers on the same network as jaeger/prometheus,
+      # otherwise a task cannot reach jaeger:4317.
+      - DOCKER_NETWORK=ecom-local
+      # Real LLM text locally instead of the canned mock reply. Ministack
+      # translates Converse -> OpenAI /chat/completions -> back to Converse,
+      # and falls back to the mock *silently* if this is unreachable --
+      # which is exactly what you want on a conference stage.
+      - MINISTACK_BEDROCK_PROXY_URL=http://ollama:11434/v1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [ecom-local]
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4566/_ministack/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ministack-redis
+    networks: [ecom-local]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  jaeger:
+    image: jaegertracing/jaeger:2.11.0
+    container_name: jaeger
+    ports:
+      - "16686:16686" # UI
+      - "4317:4317" # OTLP gRPC
+    networks: [ecom-local]
+
+  # Optional: `docker compose --profile llm up -d ollama` then
+  #           `docker compose exec ollama ollama pull llama3.2:1b`
+  # Skipped by default so `make local-up` stays fast and offline-friendly.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    profiles: [llm]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    networks: [ecom-local]
+
+volumes:
+  ollama-models:
+
+networks:
+  ecom-local:
+    name: ecom-local
