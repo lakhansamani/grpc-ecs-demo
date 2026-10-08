@@ -51,6 +51,16 @@ dns:
 		done; \
 	done
 
+# Prove on screen that this is really ECS: control plane, Fargate-shaped task
+# definition, the task self-describing via ECS_CONTAINER_METADATA_URI_V4, and
+# credentials arriving the task-role way with no keys anywhere.
+ps:
+	@AWS_ENDPOINT_URL=http://localhost:4566 bash scripts/ps.sh
+
+# Same, against real AWS (no endpoint override).
+ps-aws:
+	@CLUSTER=payments-aws bash scripts/ps.sh
+
 test:
 	go test ./...
 

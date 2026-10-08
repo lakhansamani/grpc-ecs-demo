@@ -483,13 +483,49 @@ cut external gRPC ingress and keep traffic internal. Needs an answer early, not 
 
 ---
 
+## 11.8 Proving it is really ECS (`make ps`)
+
+The audience's fair question is "how is that different from docker compose?"
+`scripts/ps.sh` answers it in seven escalating steps, and the last three are the
+convincing ones:
+
+| # | Shows | Why it convinces |
+|---|---|---|
+| 1 | `describe-services`: desired / running / pending | there is a control plane reconciling state |
+| 2 | tasks with the task-definition **revision** | deploys are immutable revisions, not restarts |
+| 3 | `networkMode: awsvpc`, `FARGATE`, `ARM64`, execution role | this is a Fargate task definition |
+| 4 | the task **self-describing** via `ECS_CONTAINER_METADATA_URI_V4` | nothing in our code sets this; the platform does |
+| 5 | `AWS_CONTAINER_CREDENTIALS_FULL_URI` | **this is how task roles deliver credentials** — no key anywhere |
+| 6 | `secrets[].valueFrom` is an ARN | the secret never entered git or the image |
+| 7 | login as each seeded user | the baked database is identical on every task |
+
+Step 4 is the one to linger on. Verified output:
+
+```
+Cluster  : arn:aws:ecs:us-east-1:000000000000:cluster/payments-local
+TaskARN  : arn:aws:ecs:us-east-1:000000000000:task/payments-local/6cd5fea5-...
+Family   : identityd rev 1
+AZ       : us-east-1a
+```
+
+Step 5 is worth a sentence too: the AWS SDK picks those two variables up on its
+own. That is the whole "no API keys on ECS" story in one `docker inspect`.
+
+**Emulator fidelity — say this out loud, do not hope nobody reads the table.**
+`healthStatus` comes back `UNKNOWN` and `LaunchType` as `None`/`EC2`, because
+Ministack does not echo those back even though the task definition requests
+`FARGATE` and the service uses the FARGATE capacity provider. Real ECS reports
+`HEALTHY` and `FARGATE`. Naming the emulator's limits yourself is more credible
+than being caught by them, and it is precisely why the talk also deploys to AWS.
+
 ## 12. Stage runbook
 
 ```bash
 make local-up          # ministack + jaeger (+ make llm-up for real LLM text)
 make tf-local-apply    # terraform apply → ECS tasks on the emulator
 make dns               # Cloud Map alias shim
-make demo              # register → login → approved + declined authorize
+make ps                # PROVE it is ECS: control plane, task metadata, task role
+make demo              # login → approved + declined authorize + explanation
 make ts-demo           # the SAME flow from TypeScript  ← polyglot segment
 make demo-load         # sustained Authorize; watch per-task metrics   ← §11.2
 make scale N=3         # identityd 1→3: show the failure, then the fix
