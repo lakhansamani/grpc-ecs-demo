@@ -15,7 +15,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 )
@@ -47,11 +47,16 @@ func Init(ctx context.Context, cfg Config) (trace.TracerProvider, Shutdown, erro
 		return nil, nil, fmt.Errorf("observability: otlp exporter: %w", err)
 	}
 
+	// The semconv version MUST match the one the SDK's resource.Default()
+	// uses, or Merge fails with "conflicting Schema URL" and the service
+	// refuses to start. That only shows up once an OTLP endpoint is actually
+	// configured, so it hides from any local run that leaves tracing off -
+	// which is exactly why this got deployed before the talk and not during it.
 	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(
 		semconv.SchemaURL,
 		semconv.ServiceName(cfg.ServiceName),
 		semconv.ServiceVersion(cfg.Version),
-		semconv.DeploymentEnvironmentName(cfg.Environment),
+		semconv.DeploymentEnvironmentNameKey.String(cfg.Environment),
 	))
 	if err != nil {
 		return nil, nil, fmt.Errorf("observability: resource: %w", err)

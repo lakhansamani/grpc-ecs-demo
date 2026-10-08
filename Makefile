@@ -30,14 +30,24 @@ tf-local-destroy:
 # Aliases EVERY task, not just the first - docker's embedded DNS returns all A
 # records for a shared alias, which is what makes the local load-balancing demo
 # possible at all.
+# NOTE: ONE regex filter, not two name filters. Docker ORs multiple
+# --filter name= values, so "name=ministack-ecs-" plus "name=identityd" matches
+# every task and would alias paymentd's container as identityd.ecom.local -
+# a silent, demo-breaking misroute.
 dns:
 	@docker network create ecom-dns >/dev/null 2>&1 || true
+	@# Detach everything first. `docker network rm` cannot be used here: it
+	@# fails while containers are attached, which would silently leave stale
+	@# aliases pointing at replaced tasks.
+	@for cid in $$(docker ps --filter "name=ministack-ecs-" -q); do \
+		docker network disconnect -f ecom-dns $$cid >/dev/null 2>&1 || true; \
+	done
 	@for svc in identityd paymentd; do \
-		cids=$$(docker ps --filter "name=ministack-ecs-" --filter "name=$$svc" -q); \
+		cids=$$(docker ps --filter "name=ministack-ecs-.*-$$svc$$" -q); \
 		if [ -z "$$cids" ]; then echo "no running task for $$svc"; continue; fi; \
 		for cid in $$cids; do \
-			docker network connect --alias $$svc.ecom.local ecom-dns $$cid 2>/dev/null \
-				&& echo "aliased $$svc.ecom.local -> $$cid" || true; \
+			docker network connect --alias $$svc.ecom.local ecom-dns $$cid \
+				&& echo "aliased $$svc.ecom.local -> $$cid"; \
 		done; \
 	done
 
@@ -46,7 +56,7 @@ test:
 
 # awsvpc tasks have no host port, so the demo client runs ON the task network.
 demo:
-	go run ./cmd/demo-client -mode=once
+	bash scripts/smoke.sh
 
 # Authenticates as a SEEDED user, never a freshly registered one: a Register'd
 # user exists on exactly one identityd task (SPEC.md 6.4).

@@ -571,6 +571,48 @@ Distroless ARM64 Go 1.27 / grpc-go 1.84.0 binary, Terraform 1.14.5 / AWS provide
 Gotcha found and fixed: publishing the RDS port range on the ministack container makes
 `CreateDBInstance` fail with `port is already allocated` and then silently report a dead endpoint.
 
+### 14.1b Terraform -> Ministack ECS, end to end — PASSED (2026-10-08)
+
+`terraform apply` in `envs/local` creates VPC, subnets, security group, ECR
+repos, ECS cluster with FARGATE + FARGATE_SPOT, Cloud Map namespace, log group,
+Secrets Manager secret, IAM roles, and both ECS services. Tasks start, and
+`scripts/smoke.sh` passes against them: approved, idempotent replay, over-limit
+decline with a rendered explanation, blocked-category decline, and an
+unauthenticated call rejected through the identityd hop.
+
+**Secrets Manager injection works on the emulator.** identityd requires
+`JWT_SECRET` and refuses to start without it, so the task reaching SERVING is
+proof that `secrets[].valueFrom` resolved.
+
+Four real bugs this deployment caught that no local run would have:
+
+1. **`count` cannot depend on a resource attribute.** `count = var.namespace_id
+   == "" ? 0 : 1` fails with "Invalid count argument" because the namespace does
+   not exist at plan time. Replaced with a statically-known
+   `enable_service_discovery` flag.
+2. **OTel semconv version mismatch crash-looped both tasks.**
+   `resource.Merge(resource.Default(), ...)` rejects a resource whose schema URL
+   differs from the SDK's, so importing `semconv/v1.37.0` against otel sdk
+   v1.47.0 (which uses v1.43.0) is fatal. **It is invisible locally**, because
+   with no `OTEL_EXPORTER_OTLP_ENDPOINT` the tracer short-circuits to a no-op and
+   never builds a resource. Fixed, and pinned by a regression test that passes an
+   endpoint.
+3. **Ministack cannot create Cloud Map services via Terraform.** Its
+   `CreateService` requires a top-level `NamespaceId`; the AWS provider sends it
+   nested in `DnsConfig`, which is what real AWS accepts. Confirmed by calling
+   both shapes directly. So `enable_service_discovery = false` locally and the
+   `make dns` alias shim stands in; `true` on AWS.
+4. **`docker ps` ORs multiple `--filter name=` values.** The first `make dns`
+   therefore aliased *paymentd's* container as `identityd.ecom.local` — a silent
+   misroute that would have broken the stage demo in a baffling way. Fixed with
+   one anchored regex filter, plus a force-disconnect pass, because
+   `docker network rm` fails while containers are attached and left stale
+   aliases behind.
+
+Lesson for the talk, worth saying out loud: items 2 and 4 were only findable by
+actually deploying. Neither unit tests nor `terraform validate` would have
+surfaced them.
+
 ### 14.2 SQLite pure-Go static build (2026-10-07)
 
 ```
