@@ -1,0 +1,11 @@
+.git
+.gitignore
+clients/node/node_modules
+docs
+terraform
+compose.yaml
+Makefile
+SPEC.md
+*.md
+*.db
+data
