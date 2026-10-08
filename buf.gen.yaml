@@ -1,0 +1,13 @@
+version: v2
+managed:
+  enabled: false
+plugins:
+  # Pinned remote plugins: no local protoc, no protoc-gen-* on PATH.
+  - remote: buf.build/protocolbuffers/go:v1.36.12
+    out: gen/go
+    opt: paths=source_relative
+  # require_unimplemented_servers stays ON (default) so adding an RPC to the
+  # proto without implementing it is a compile error, not a runtime 501.
+  - remote: buf.build/grpc/go:v1.6.2
+    out: gen/go
+    opt: paths=source_relative

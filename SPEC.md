@@ -38,7 +38,7 @@ Two services, **all RPCs unary**, one real network hop between them.
   Authorize         │     │                                             │
   (unary)           │     ├──gRPC────> identityd ──> SQLite (baked-in)  │
                     │     │             VerifyToken                     │
-                    │     └──────────> Bedrock Converse (explain only)  │
+                    │     └──────────> explain: template (Bedrock opt-in)│
                     └───────────────────────────────────────────────────┘
       both ──OTLP──> Jaeger (local) / ADOT→X-Ray (AWS)
       both ──:909x/metrics──> Prometheus
@@ -267,6 +267,44 @@ The `rds` Terraform module is written and kept, **not applied by default**, so f
 - **Prometheus needs service discovery**, not static targets: task IPs are assigned at runtime.
   Locally use `docker_sd_configs` (the Docker socket is already mounted); on AWS use
   `dns_sd_configs` against `identityd.ecom.local`. Acceptance criterion 4 depends on this.
+
+### 6.8 Explanations without Bedrock access — the design
+
+The deployed environment has **no Bedrock access**, so the explanation path must work with nothing
+behind it. `internal/payment/explain` therefore ships three pieces:
+
+| Piece | Role |
+|---|---|
+| `Template` | Pure Go, no network, no credentials, deterministic. **The default, including on ECS.** |
+| `Bedrock` | The real AWS SDK `bedrockruntime` Converse client. Opt-in via `LLM_PROVIDER=bedrock`. |
+| `Fallback` | Wraps any provider; on error *or* empty output it degrades to `Template`. Always applied. |
+
+**Why the template is not a cop-out.** For a card decline, a deterministic template is arguably the
+*correct* production choice: auditable, instant, free, translatable, and structurally incapable of
+inventing a reason the rules did not give. The honest line for the stage is:
+
+> "The rules decide. The model only phrases it. And for a regulated decline reason, a template does
+> that better than a model — so that is what ships. Here is the interface, so swapping it is a
+> config change, not a rewrite."
+
+**How the Bedrock path is mocked when it is enabled.** No custom endpoint code exists. The AWS SDK
+already honours `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` (its generic `AWS_ENDPOINT_URL_<SDK_ID>`
+mechanism, verified ✅), so the deployment alone decides where the client points:
+
+| Environment | `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` | Result |
+|---|---|---|
+| local | `http://ministack:4566` | Ministack's emulated Converse (mock text, or real prose via the Ollama proxy) |
+| ECS, no access | a stub endpoint, or simply leave `LLM_PROVIDER=template` | template text |
+| real Bedrock | unset | real model via the task role |
+
+**This is the talk's thesis for the third time**: the same endpoint-override trick as Terraform's
+`endpoints` block and the same boundary discipline as the database driver. One env var, and
+**not a single `if local` branch anywhere in the codebase**. Verified by a test that stands a stub
+HTTP server in for Bedrock and asserts the SDK routes to it ✅.
+
+**Consequence for §11:** the "task IAM role instead of API keys" lesson now hangs on **Secrets
+Manager** (the shared `JWT_SECRET`, §6.6), not on Bedrock. That is a better example anyway, because
+it is load-bearing — get it wrong with 3 `identityd` tasks and the demo breaks.
 
 ### 6.5 Driver abstraction
 
@@ -535,7 +573,9 @@ plan. It is kept only for the research trail; `docs/evidence/` holds the 14 proj
    to the floor: *both services on Ministack ECS via Terraform + one service on real Fargate*, with
    ALB, Secrets, observability and §11.2 as stretch.
 2. **Domain + ACM cert** for the ALB gRPC listener — or agree now to cut external ingress.
-3. **Bedrock model access** enabled in the demo region (per-region, per-model opt-in) — Nova Micro
-   or Claude Haiku.
+3. ~~Bedrock model access~~ — **RESOLVED 2026-10-08: there is no Bedrock access on the ECS
+   deployment.** See §6.8. The explanation provider defaults to `template` everywhere; the Bedrock
+   client stays in the repo as reference code and is reachable via an endpoint override. No IAM
+   permission, no model opt-in, no region constraint, no cost.
 4. **Repo name** — `grpc-ecs-payments` used throughout; one `git mv` + module rename to change.
 5. **Push to GitHub?** Public repo for the audience to clone, and under which account.

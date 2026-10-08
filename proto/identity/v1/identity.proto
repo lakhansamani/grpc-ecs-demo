@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package identity.v1;
+
+option go_package = "github.com/lakhansamani/grpc-ecs-payments/gen/go/identity/v1;identityv1";
+
+// IdentityService owns users and tokens. Stateless: its SQLite database is
+// baked into the image, so every task answers reads identically and the
+// service can be scaled horizontally.
+service IdentityService {
+  // Register creates a user. NOTE: writes land on the single task that served
+  // the call and do not survive task replacement - see SPEC.md 6.4.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  // Login verifies the password and mints a short-lived JWT.
+  rpc Login(LoginRequest) returns (LoginResponse);
+  // VerifyToken resolves the caller from the "authorization" gRPC metadata.
+  // paymentd calls this on every Authorize - it is the demo's second hop.
+  rpc VerifyToken(VerifyTokenRequest) returns (VerifyTokenResponse);
+}
+
+message User {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+}
+
+message RegisterRequest {
+  string name = 1;
+  string email = 2;
+  string password = 3;
+}
+
+message RegisterResponse {
+  string user_id = 1;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string token = 1;
+  // Unix millis. Lets a client refresh without parsing the JWT.
+  int64 expires_at = 2;
+}
+
+// The token travels in gRPC metadata ("authorization: Bearer <jwt>"),
+// never in the request body.
+message VerifyTokenRequest {}
+
+message VerifyTokenResponse {
+  User user = 1;
+}

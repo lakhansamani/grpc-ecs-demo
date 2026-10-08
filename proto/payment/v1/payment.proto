@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package payment.v1;
+
+option go_package = "github.com/lakhansamani/grpc-ecs-payments/gen/go/payment/v1;paymentv1";
+
+// PaymentService is issuer-side: it MAKES the authorization decision about its
+// own customer. There is no payment-gateway or PSP call anywhere - see
+// SPEC.md 3.3 for the authorization / capture / settlement distinction.
+service PaymentService {
+  // Authorize is the hot path: verify the caller (gRPC hop to identityd),
+  // evaluate rules, persist, answer. Step 1 of 3 - places a hold, moves no money.
+  rpc Authorize(AuthorizeRequest) returns (AuthorizeResponse);
+  rpc GetTransaction(GetTransactionRequest) returns (GetTransactionResponse);
+  rpc ListTransactions(ListTransactionsRequest) returns (ListTransactionsResponse);
+  // ExplainDecision phrases an already-made decision in natural language.
+  // The rules decide; this only narrates.
+  rpc ExplainDecision(ExplainDecisionRequest) returns (ExplainDecisionResponse);
+}
+
+enum Decision {
+  DECISION_UNSPECIFIED = 0;
+  DECISION_APPROVED = 1;
+  DECISION_DECLINED = 2;
+}
+
+enum DeclineReason {
+  DECLINE_REASON_UNSPECIFIED = 0;
+  DECLINE_REASON_LIMIT_EXCEEDED = 1;
+  DECLINE_REASON_VELOCITY = 2;
+  DECLINE_REASON_MERCHANT_BLOCKED = 3;
+  DECLINE_REASON_INSUFFICIENT_FUNDS = 4;
+}
+
+message Transaction {
+  string id = 1;
+  string user_id = 2;
+  // Minor units (paise). Money is NEVER a float.
+  int64 amount_minor = 3;
+  // ISO-4217, e.g. "INR".
+  string currency = 4;
+  string merchant_id = 5;
+  // Merchant category code.
+  string merchant_category = 6;
+  Decision decision = 7;
+  DeclineReason decline_reason = 8;
+  // Unix millis.
+  int64 created_at = 9;
+}
+
+message AuthorizeRequest {
+  int64 amount_minor = 1;
+  string currency = 2;
+  string merchant_id = 3;
+  string merchant_category = 4;
+  // Retries must not double-authorize. Any payment API without this is wrong.
+  string idempotency_key = 5;
+}
+
+message AuthorizeResponse {
+  Transaction transaction = 1;
+  // True when an existing transaction was returned for a repeated
+  // idempotency_key rather than a new authorization being performed.
+  bool idempotent_replay = 2;
+}
+
+message GetTransactionRequest {
+  string id = 1;
+}
+
+message GetTransactionResponse {
+  Transaction transaction = 1;
+}
+
+message ListTransactionsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message ListTransactionsResponse {
+  repeated Transaction transactions = 1;
+  string next_page_token = 2;
+}
+
+message ExplainDecisionRequest {
+  string transaction_id = 1;
+}
+
+message ExplainDecisionResponse {
+  string explanation = 1;
+  // Which provider produced it: "template", "bedrock:<model>", etc.
+  // Makes it obvious on stage whether the LLM path actually ran.
+  string provider = 2;
+}
