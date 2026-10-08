@@ -129,6 +129,49 @@ a narrower resource.
 local template — SPEC.md 6.8), RDS (SQLite lives on the task — SPEC.md 6), ELB
 (the ALB segment is above the cut line), S3 (Terraform state is local).
 
+## Demo-minimum vs. nice-to-have — and the fallbacks are real code
+
+Everything below is implemented and tested, not advice. Apply the minimum
+profile with:
+
+```sh
+terraform -chdir=terraform/envs/aws apply -var-file=minimal.tfvars \
+  -var identity_image=... -var payment_image=...
+```
+
+### MUST request (three things)
+
+| Permission | Why there is no way around it |
+|---|---|
+| `iam:PassRole` on the execution role, conditioned on `ecs-tasks.amazonaws.com` | Fargate cannot start a task without an execution role. Blocking, full stop. |
+| `logs:CreateLogGroup` (+ Describe/Delete/PutRetentionPolicy) | the `awslogs` driver needs a group. The alternative is `create_log_group = false` plus `awslogs-create-group`, but then the **execution role** needs `logs:CreateLogGroup`, and the AWS managed policy does **not** include it — so somebody needs this either way. |
+| `servicediscovery:*` **+ `route53:*`** | only if you want the service-discovery and load-balancing segments on AWS. This is the talk's best content, so I would fight for it. |
+
+### CAN SKIP — just mention it on a slide
+
+| Skip | How | Set |
+|---|---|---|
+| `iam:CreateRole` | reuse `ecsTaskExecutionRole`, which most accounts already have | `existing_execution_role_arn = "arn:..."` |
+| **Secrets Manager** | `JWT_SECRET` as a plain env value, still one shared value across all tasks, so scaling still works | `use_secrets_manager = false` |
+| Fargate Spot | plain `FARGATE` launch type | `use_spot = false` (the default) |
+| Bedrock, RDS, ELB, S3 | already not used by the demo | — |
+
+**Verified on the emulator with the minimum profile:** 0 secrets created, the
+reused role attached to the task definition, `JWT_SECRET` arriving as an env
+var, and the full smoke test passing.
+
+**What to say when you skip Secrets Manager** — show the task definition on a
+slide and say it out loud:
+
+> "In production this is `secrets: [{name: JWT_SECRET, valueFrom: <arn>}]`, and
+> the ECS agent resolves it with the execution role before my code starts, so
+> the value never touches the image or git. Here it is a plain environment
+> variable, because this account does not grant Secrets Manager — and that is
+> one line of Terraform apart."
+
+That is a stronger moment than a working demo of it, because you are showing
+you know the difference.
+
 ## If a permission is refused, here is what the demo loses
 
 Ordered by how much it hurts.

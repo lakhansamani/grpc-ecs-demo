@@ -51,6 +51,49 @@ variable "otlp_endpoint" {
   default     = ""
   description = "host:port for OTLP gRPC. Empty disables tracing rather than failing."
 }
+# ---- permission fallbacks -------------------------------------------------
+# These exist so the demo degrades gracefully in an account with a restricted
+# role, rather than not deploying at all. See docs/AWS_PERMISSIONS.md.
+
+variable "existing_execution_role_arn" {
+  type        = string
+  default     = ""
+  description = "Reuse an existing task execution role instead of creating one (for accounts without iam:CreateRole). iam:PassRole is still mandatory."
+}
+
+variable "use_secrets_manager" {
+  type        = bool
+  default     = true
+  description = <<-EOT
+    true  - JWT_SECRET is injected from Secrets Manager via the task
+            definition's `secrets` block. The real pattern, and the version to
+            demo if the account allows it.
+    false - JWT_SECRET is passed as a plain environment value. Needs no
+            Secrets Manager permission. Every identityd task still shares one
+            secret, so scaling still works; you just lose the segment that
+            shows the value never entering the image.
+  EOT
+}
+
+variable "jwt_secret_plain" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Used only when use_secrets_manager = false. Leave empty to generate one."
+}
+
+variable "create_log_group" {
+  type        = bool
+  default     = true
+  description = "false relies on ECS creating the group via awslogs-create-group, for accounts without logs:CreateLogGroup. The EXECUTION ROLE then needs logs:CreateLogGroup, which the AWS managed policy does not include."
+}
+
+variable "use_spot" {
+  type        = bool
+  default     = false
+  description = "Fargate Spot (~70% cheaper, interruptible). Off by default - see the ecs-service module for why."
+}
+
 variable "enable_service_discovery" {
   type        = bool
   default     = true
@@ -99,17 +142,35 @@ module "ecr" {
 }
 
 module "cluster" {
-  source    = "../modules/ecs-cluster"
-  name      = "${var.name_prefix}-${var.environment}"
-  namespace = var.namespace
-  vpc_id    = module.network.vpc_id
-  tags      = local.tags
+  source           = "../modules/ecs-cluster"
+  name             = "${var.name_prefix}-${var.environment}"
+  namespace        = var.namespace
+  vpc_id           = module.network.vpc_id
+  create_log_group = var.create_log_group
+  tags             = local.tags
 }
 
 module "secrets" {
-  source = "../modules/secrets"
-  name   = "${var.name_prefix}-${var.environment}-jwt-secret"
-  tags   = local.tags
+  source   = "../modules/secrets"
+  count    = var.use_secrets_manager ? 1 : 0
+  name     = "${var.name_prefix}-${var.environment}-jwt-secret"
+  generate = var.jwt_secret_plain == ""
+  value    = var.jwt_secret_plain
+  tags     = local.tags
+}
+
+# Fallback secret for use_secrets_manager = false. Still ONE value shared by
+# every identityd task, which is the property that actually matters.
+resource "random_password" "jwt_plain" {
+  count   = var.use_secrets_manager || var.jwt_secret_plain != "" ? 0 : 1
+  length  = 48
+  special = false
+}
+
+locals {
+  jwt_plain_value = var.use_secrets_manager ? "" : (
+    var.jwt_secret_plain != "" ? var.jwt_secret_plain : random_password.jwt_plain[0].result
+  )
 }
 
 # identityd: stateless, scalable, and the service the load-balancing segment
@@ -118,6 +179,7 @@ module "identityd" {
   source = "../modules/ecs-service"
 
   name           = "identityd"
+  use_spot       = var.use_spot
   cluster_id     = module.cluster.cluster_id
   image          = var.identity_image
   container_port = local.identity_port
@@ -127,7 +189,7 @@ module "identityd" {
   subnet_ids         = module.network.subnet_ids
   security_group_ids = [module.network.security_group_id]
 
-  environment = {
+  environment = merge({
     ENVIRONMENT                 = var.environment
     GRPC_ADDR                   = ":${local.identity_port}"
     METRICS_ADDR                = ":9091"
@@ -137,13 +199,13 @@ module "identityd" {
     GRPC_MAX_CONNECTION_AGE = "30s"
     # Must stay below the task's stop_timeout (30s) or the drain gets cut off.
     SHUTDOWN_TIMEOUT = "15s"
-  }
+    },
+    var.use_secrets_manager ? {} : { JWT_SECRET = local.jwt_plain_value }
+  )
 
   # Every identityd task must share one signing secret, or a token minted by
-  # one task fails on another. This is why the demo needs Secrets Manager.
-  secrets = {
-    JWT_SECRET = module.secrets.arn
-  }
+  # one task fails on another. This is why the demo wants Secrets Manager.
+  secrets = var.use_secrets_manager ? { JWT_SECRET = module.secrets[0].arn } : {}
 
   log_group_name           = module.cluster.log_group_name
   aws_region               = var.aws_region
@@ -159,6 +221,7 @@ module "paymentd" {
   source = "../modules/ecs-service"
 
   name           = "paymentd"
+  use_spot       = var.use_spot
   cluster_id     = module.cluster.cluster_id
   image          = var.payment_image
   container_port = local.payment_port
@@ -192,15 +255,18 @@ module "paymentd" {
 }
 
 module "iam" {
-  source      = "../modules/iam"
-  name_prefix = "${var.name_prefix}-${var.environment}"
-  secret_arns = [module.secrets.arn]
-  tags        = local.tags
+  source                      = "../modules/iam"
+  name_prefix                 = "${var.name_prefix}-${var.environment}"
+  secret_arns                 = var.use_secrets_manager ? [module.secrets[0].arn] : []
+  existing_execution_role_arn = var.existing_execution_role_arn
+  tags                        = local.tags
 }
 
 output "cluster_name" { value = module.cluster.cluster_name }
 output "namespace" { value = module.cluster.namespace_name }
 output "ecr_repository_urls" { value = module.ecr.repository_urls }
-output "jwt_secret_name" { value = module.secrets.name }
+output "jwt_secret_name" {
+  value = var.use_secrets_manager ? module.secrets[0].name : "(plain env var - no Secrets Manager)"
+}
 output "identity_dns" { value = "identityd.${module.cluster.namespace_name}:${local.identity_port}" }
 output "payment_dns" { value = "paymentd.${module.cluster.namespace_name}:${local.payment_port}" }

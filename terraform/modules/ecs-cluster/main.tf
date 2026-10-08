@@ -53,7 +53,14 @@ resource "aws_service_discovery_private_dns_namespace" "this" {
   tags        = var.tags
 }
 
+variable "create_log_group" {
+  type        = bool
+  default     = true
+  description = "false lets ECS create the group via awslogs-create-group instead."
+}
+
 resource "aws_cloudwatch_log_group" "this" {
+  count             = var.create_log_group ? 1 : 0
   name              = "/ecs/${var.name}"
   retention_in_days = var.log_retention_days
   tags              = var.tags
@@ -64,4 +71,4 @@ output "cluster_name" { value = aws_ecs_cluster.this.name }
 output "cluster_arn" { value = aws_ecs_cluster.this.arn }
 output "namespace_id" { value = aws_service_discovery_private_dns_namespace.this.id }
 output "namespace_name" { value = aws_service_discovery_private_dns_namespace.this.name }
-output "log_group_name" { value = aws_cloudwatch_log_group.this.name }
+output "log_group_name" { value = "/ecs/${var.name}" }

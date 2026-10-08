@@ -11,6 +11,15 @@
 # permissions granted "just in case".
 
 variable "name_prefix" { type = string }
+
+# When set, no roles are created and this ARN is used as-is. For accounts where
+# iam:CreateRole is not granted but a role already exists (most accounts that
+# have ever used ECS have `ecsTaskExecutionRole`). iam:PassRole is still
+# required - Fargate cannot start a task without passing an execution role.
+variable "existing_execution_role_arn" {
+  type    = string
+  default = ""
+}
 variable "secret_arns" {
   type    = list(string)
   default = []
@@ -30,14 +39,20 @@ data "aws_iam_policy_document" "assume" {
   }
 }
 
+locals {
+  create_roles = var.existing_execution_role_arn == ""
+}
+
 resource "aws_iam_role" "execution" {
+  count              = local.create_roles ? 1 : 0
   name               = "${var.name_prefix}-execution"
   assume_role_policy = data.aws_iam_policy_document.assume.json
   tags               = var.tags
 }
 
 resource "aws_iam_role_policy_attachment" "execution_managed" {
-  role       = aws_iam_role.execution.name
+  count      = local.create_roles ? 1 : 0
+  role       = aws_iam_role.execution[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
@@ -51,17 +66,25 @@ data "aws_iam_policy_document" "read_secrets" {
 }
 
 resource "aws_iam_role_policy" "execution_secrets" {
-  count  = length(var.secret_arns) == 0 ? 0 : 1
+  count  = local.create_roles && length(var.secret_arns) > 0 ? 1 : 0
   name   = "read-injected-secrets"
-  role   = aws_iam_role.execution.id
+  role   = aws_iam_role.execution[0].id
   policy = data.aws_iam_policy_document.read_secrets[0].json
 }
 
 resource "aws_iam_role" "task" {
+  count              = local.create_roles ? 1 : 0
   name               = "${var.name_prefix}-task"
   assume_role_policy = data.aws_iam_policy_document.assume.json
   tags               = var.tags
 }
 
-output "execution_role_arn" { value = aws_iam_role.execution.arn }
-output "task_role_arn" { value = aws_iam_role.task.arn }
+output "execution_role_arn" {
+  value = local.create_roles ? aws_iam_role.execution[0].arn : var.existing_execution_role_arn
+}
+
+# Falls back to the execution role when roles are not being created. The task
+# role is empty anyway: the services call no AWS API at runtime.
+output "task_role_arn" {
+  value = local.create_roles ? aws_iam_role.task[0].arn : var.existing_execution_role_arn
+}

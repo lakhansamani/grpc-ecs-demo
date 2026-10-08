@@ -26,9 +26,19 @@ variable "cpu_architecture" {
   type    = string
   default = "ARM64" # Graviton: cheaper, and native on an M-series laptop
 }
-variable "capacity_provider" {
-  type    = string
-  default = "FARGATE"
+# Spot is opt-in rather than default, for two reasons:
+#
+#  1. capacity_provider_strategy produces a perpetual diff against the local
+#     emulator, which does not echo the strategy back - and the AWS provider
+#     then refuses the apply with "force_new_deployment should be true when
+#     capacity_provider_strategy is being updated".
+#  2. plain launch_type = FARGATE needs no strategy at all.
+#
+# Fargate Spot does support ARM64 (GA Oct 2024, platform 1.4.0+), so turning
+# this on is safe where interruptions are acceptable.
+variable "use_spot" {
+  type    = bool
+  default = false
 }
 
 variable "subnet_ids" { type = list(string) }
@@ -185,10 +195,19 @@ resource "aws_ecs_service" "this" {
   task_definition = aws_ecs_task_definition.this.arn
   desired_count   = var.desired_count
 
-  capacity_provider_strategy {
-    capacity_provider = var.capacity_provider
-    weight            = 1
+  # Either a plain launch type or a capacity-provider strategy - never both.
+  launch_type = var.use_spot ? null : "FARGATE"
+
+  dynamic "capacity_provider_strategy" {
+    for_each = var.use_spot ? [1] : []
+    content {
+      capacity_provider = "FARGATE_SPOT"
+      weight            = 1
+    }
   }
+
+  # Required by the provider whenever the strategy changes.
+  force_new_deployment = var.use_spot
 
   network_configuration {
     subnets          = var.subnet_ids

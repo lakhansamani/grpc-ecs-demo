@@ -15,6 +15,24 @@ variable "identity_desired_count" {
   default = 1
 }
 
+# ---- permission fallbacks, see docs/AWS_PERMISSIONS.md and minimal.tfvars ----
+variable "existing_execution_role_arn" {
+  type    = string
+  default = ""
+}
+variable "use_secrets_manager" {
+  type    = bool
+  default = true
+}
+variable "enable_service_discovery" {
+  type    = bool
+  default = true
+}
+variable "create_log_group" {
+  type    = bool
+  default = true
+}
+
 module "stack" {
   source = "../../stack"
 
@@ -36,6 +54,11 @@ module "stack" {
 
   # No Bedrock access on this deployment. See SPEC.md 6.8.
   llm_provider = "template"
+
+  existing_execution_role_arn = var.existing_execution_role_arn
+  use_secrets_manager         = var.use_secrets_manager
+  enable_service_discovery    = var.enable_service_discovery
+  create_log_group            = var.create_log_group
 }
 
 output "cluster_name" { value = module.stack.cluster_name }
