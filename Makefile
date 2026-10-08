@@ -57,3 +57,16 @@ scale:
 	aws --endpoint-url http://localhost:4566 ecs update-service \
 		--cluster ecom-local --service identityd --desired-count $(N)
 	$(MAKE) dns
+
+# ---- codegen: ONE proto, Go + TypeScript ----
+# Generated code is committed, so a clone builds without buf installed.
+proto:
+	buf lint
+	buf generate
+
+# Refuses to generate if a change would break existing clients.
+proto-breaking:
+	buf breaking --against '.git#branch=main'
+
+ts-demo:
+	cd clients/node && npm install && npm run demo

@@ -2,7 +2,7 @@ version: v2
 managed:
   enabled: false
 plugins:
-  # Pinned remote plugins: no local protoc, no protoc-gen-* on PATH.
+  # ---- Go: messages + gRPC server/client stubs ----
   - remote: buf.build/protocolbuffers/go:v1.36.12
     out: gen/go
     opt: paths=source_relative
@@ -11,3 +11,12 @@ plugins:
   - remote: buf.build/grpc/go:v1.6.2
     out: gen/go
     opt: paths=source_relative
+
+  # ---- TypeScript: messages + service descriptors ----
+  # protoc-gen-es v2 emits both, and Connect builds clients from the
+  # descriptor at runtime - so there is no second plugin to pin.
+  # Same .proto, same `buf generate`, two languages. This is the single most
+  # common real reason teams adopt gRPC (see SPEC.md 14.3).
+  - remote: buf.build/bufbuild/es:v2.16.0
+    out: clients/node/src/gen
+    opt: target=ts
