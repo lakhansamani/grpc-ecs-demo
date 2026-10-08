@@ -88,6 +88,12 @@ variable "create_log_group" {
   description = "false relies on ECS creating the group via awslogs-create-group, for accounts without logs:CreateLogGroup. The EXECUTION ROLE then needs logs:CreateLogGroup, which the AWS managed policy does not include."
 }
 
+variable "enable_execute_command" {
+  type        = bool
+  default     = false
+  description = "ECS Exec + SSM port forwarding, so a laptop can reach a task with no public IP and no inbound SG rule. Needs ssmmessages on the task role."
+}
+
 variable "use_spot" {
   type        = bool
   default     = false
@@ -178,13 +184,14 @@ locals {
 module "identityd" {
   source = "../modules/ecs-service"
 
-  name           = "identityd"
-  use_spot       = var.use_spot
-  cluster_id     = module.cluster.cluster_id
-  image          = var.identity_image
-  container_port = local.identity_port
-  metrics_port   = 9091
-  desired_count  = var.identity_desired_count
+  name                   = "identityd"
+  use_spot               = var.use_spot
+  enable_execute_command = var.enable_execute_command
+  cluster_id             = module.cluster.cluster_id
+  image                  = var.identity_image
+  container_port         = local.identity_port
+  metrics_port           = 9091
+  desired_count          = var.identity_desired_count
 
   subnet_ids         = module.network.subnet_ids
   security_group_ids = [module.network.security_group_id]
@@ -220,13 +227,14 @@ module "identityd" {
 module "paymentd" {
   source = "../modules/ecs-service"
 
-  name           = "paymentd"
-  use_spot       = var.use_spot
-  cluster_id     = module.cluster.cluster_id
-  image          = var.payment_image
-  container_port = local.payment_port
-  metrics_port   = 9092
-  desired_count  = var.payment_desired_count
+  name                   = "paymentd"
+  use_spot               = var.use_spot
+  enable_execute_command = var.enable_execute_command
+  cluster_id             = module.cluster.cluster_id
+  image                  = var.payment_image
+  container_port         = local.payment_port
+  metrics_port           = 9092
+  desired_count          = var.payment_desired_count
 
   subnet_ids         = module.network.subnet_ids
   security_group_ids = [module.network.security_group_id]
@@ -259,6 +267,7 @@ module "iam" {
   name_prefix                 = "${var.name_prefix}-${var.environment}"
   secret_arns                 = var.use_secrets_manager ? [module.secrets[0].arn] : []
   existing_execution_role_arn = var.existing_execution_role_arn
+  enable_execute_command      = var.enable_execute_command
   tags                        = local.tags
 }
 

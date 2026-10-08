@@ -72,6 +72,34 @@ resource "aws_iam_role_policy" "execution_secrets" {
   policy = data.aws_iam_policy_document.read_secrets[0].json
 }
 
+# ECS Exec and SSM port forwarding run through the SSM messages channel, and
+# those permissions must sit on the TASK role, not the execution role - the
+# agent uses the task's own credentials for this.
+variable "enable_execute_command" {
+  type    = bool
+  default = false
+}
+
+data "aws_iam_policy_document" "ssm_messages" {
+  count = var.enable_execute_command ? 1 : 0
+  statement {
+    actions = [
+      "ssmmessages:CreateControlChannel",
+      "ssmmessages:CreateDataChannel",
+      "ssmmessages:OpenControlChannel",
+      "ssmmessages:OpenDataChannel",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "task_ssm" {
+  count  = local.create_roles && var.enable_execute_command ? 1 : 0
+  name   = "ecs-exec-ssm-messages"
+  role   = aws_iam_role.task[0].id
+  policy = data.aws_iam_policy_document.ssm_messages[0].json
+}
+
 resource "aws_iam_role" "task" {
   count              = local.create_roles ? 1 : 0
   name               = "${var.name_prefix}-task"

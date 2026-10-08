@@ -36,6 +36,21 @@ variable "cpu_architecture" {
 #
 # Fargate Spot does support ARM64 (GA Oct 2024, platform 1.4.0+), so turning
 # this on is safe where interruptions are acceptable.
+# ECS Exec. Two uses:
+#   - `aws ecs execute-command` to get a shell-ish probe into a running task
+#   - SSM port forwarding, so Postman on your laptop can reach a task with NO
+#     public IP and NO inbound security-group rule:
+#
+#       aws ssm start-session --document-name AWS-StartPortForwardingSession \
+#         --target ecs:<cluster>_<taskId>_<runtimeId> \
+#         --parameters "localPortNumber=50052,portNumber=50052"
+#
+# Requires ssmmessages permissions on the TASK role (see the iam module).
+variable "enable_execute_command" {
+  type    = bool
+  default = false
+}
+
 variable "use_spot" {
   type    = bool
   default = false
@@ -208,6 +223,8 @@ resource "aws_ecs_service" "this" {
 
   # Required by the provider whenever the strategy changes.
   force_new_deployment = var.use_spot
+
+  enable_execute_command = var.enable_execute_command
 
   network_configuration {
     subnets          = var.subnet_ids

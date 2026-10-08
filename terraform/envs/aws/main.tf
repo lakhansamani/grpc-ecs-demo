@@ -32,6 +32,10 @@ variable "create_log_group" {
   type    = bool
   default = true
 }
+variable "enable_execute_command" {
+  type    = bool
+  default = true
+}
 
 module "stack" {
   source = "../../stack"
@@ -59,6 +63,7 @@ module "stack" {
   use_secrets_manager         = var.use_secrets_manager
   enable_service_discovery    = var.enable_service_discovery
   create_log_group            = var.create_log_group
+  enable_execute_command      = var.enable_execute_command
 }
 
 output "cluster_name" { value = module.stack.cluster_name }
