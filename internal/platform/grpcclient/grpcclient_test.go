@@ -1,9 +1,14 @@
 package grpcclient
 
 import (
+	"context"
+	"net"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 )
 
 // A bare host:port must become dns:/// or round_robin has a single address to
@@ -57,4 +62,47 @@ func TestDuplicateSubsystemStillCollides(t *testing.T) {
 		}
 	}()
 	_, _ = Dial("b:2", Options{Registry: reg, Subsystem: "same"})
+}
+
+// Warm must give up rather than block forever when nothing is listening -
+// a service whose upstream is down should still start and serve.
+func TestWarmTimesOutOnDeadUpstream(t *testing.T) {
+	conn, err := Dial("127.0.0.1:1", Options{Registry: prometheus.NewRegistry(), Subsystem: "dead"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	start := time.Now()
+	if err := Warm(context.Background(), conn, 300*time.Millisecond); err == nil {
+		t.Fatal("want an error for an upstream that is not listening")
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("Warm took %s; it must respect its timeout", elapsed)
+	}
+}
+
+// And it must report ready against something that IS listening, so the first
+// real RPC does not pay for the handshake.
+func TestWarmSucceedsAgainstLiveServer(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := grpc.NewServer()
+	go func() { _ = srv.Serve(lis) }()
+	defer srv.Stop()
+
+	conn, err := Dial(lis.Addr().String(), Options{Registry: prometheus.NewRegistry(), Subsystem: "live"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	if err := Warm(context.Background(), conn, 5*time.Second); err != nil {
+		t.Fatalf("Warm against a live server: %v", err)
+	}
+	if got := conn.GetState(); got != connectivity.Ready {
+		t.Fatalf("state after Warm = %v, want Ready", got)
+	}
 }

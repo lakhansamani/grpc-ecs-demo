@@ -9,6 +9,9 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"time"
+
+	"google.golang.org/grpc"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -94,6 +97,17 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	defer func() { _ = productConn.Close() }()
+
+	// Connect to the upstreams before we start accepting traffic, so the
+	// first real request does not pay for the handshake - or fail outright.
+	// Not fatal: they may legitimately come up after us.
+	for name, conn := range map[string]*grpc.ClientConn{"user": userConn, "product": productConn} {
+		if err := grpcclient.Warm(ctx, conn, 5*time.Second); err != nil {
+			log.Warn("upstream not ready at boot, will connect on demand", "upstream", name, "err", err)
+		} else {
+			log.Info("upstream ready", "upstream", name)
+		}
+	}
 
 	srv := grpcserver.New(grpcserver.Config{
 		ServiceName:      serviceName,

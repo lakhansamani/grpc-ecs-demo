@@ -169,3 +169,7 @@ dev-gatewayd:
 # Prove REST works, and that the internal-only RPC is NOT exposed.
 dev-rest:
 	@bash scripts/rest-smoke.sh
+
+# Hit every rpc and every REST route, and report anything missed.
+api-coverage:
+	@bash scripts/api-coverage.sh

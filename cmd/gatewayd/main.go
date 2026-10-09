@@ -106,6 +106,12 @@ func run(log *slog.Logger) error {
 		conns[name] = conn
 	}
 
+	for name, conn := range conns {
+		if err := grpcclient.Warm(ctx, conn, 5*time.Second); err != nil {
+			log.Warn("upstream not ready at boot, will connect on demand", "upstream", name, "err", err)
+		}
+	}
+
 	// The default header matcher already forwards Authorization into gRPC
 	// metadata as "authorization", which is what the services read.
 	mux := runtime.NewServeMux(

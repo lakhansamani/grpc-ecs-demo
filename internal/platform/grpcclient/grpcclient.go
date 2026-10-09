@@ -21,6 +21,7 @@
 package grpcclient
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 )
@@ -105,4 +107,39 @@ func normalizeTarget(target string) string {
 		return target
 	}
 	return "dns:///" + target
+}
+
+// Warm forces the connection to be established before the caller starts
+// serving, and waits until it is usable.
+//
+// Why this is needed: grpc.NewClient is LAZY. It validates the target and
+// returns immediately without connecting, so the FIRST RPC pays for name
+// resolution and the TCP/HTTP2 handshake - and if the upstream is not up yet,
+// that first RPC fails fast rather than waiting. On ECS that means the first
+// real request after a deploy can fail even though everything is healthy
+// seconds later.
+//
+// A failure here is not fatal: the upstream may legitimately start after us.
+// The caller logs it and serves anyway, and gRPC reconnects on its own.
+func Warm(ctx context.Context, conn *grpc.ClientConn, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	conn.Connect()
+	for {
+		switch s := conn.GetState(); s {
+		case connectivity.Ready:
+			return nil
+		case connectivity.Shutdown:
+			return fmt.Errorf("grpcclient: connection to %s is shut down", conn.Target())
+		default:
+			if !conn.WaitForStateChange(ctx, s) {
+				return fmt.Errorf("grpcclient: %s not ready within %s (state %s)",
+					conn.Target(), timeout, s)
+			}
+		}
+	}
 }
