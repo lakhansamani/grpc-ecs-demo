@@ -215,8 +215,18 @@ resource "aws_service_discovery_service" "this" {
   }
 
   # ECS reports task health, so Cloud Map must not probe independently.
-  # An empty block selects custom (caller-reported) health checking.
-  health_check_custom_config {}
+  #
+  # DO NOT "clean up" the deprecated failure_threshold below. An EMPTY
+  # health_check_custom_config block makes the provider send no custom health
+  # config at all, and then Cloud Map never accepts ECS's health reports: every
+  # instance stays AWS_INIT_HEALTH_STATUS=UNHEALTHY, is excluded from DNS
+  # answers, and clients fail with grpc code 14 "no children to pick from".
+  #
+  # Verified on real AWS 2026-10-09. AWS forces the value to 1 regardless, so
+  # the deprecation warning is cosmetic but the BLOCK is required.
+  health_check_custom_config {
+    failure_threshold = 1
+  }
 
   tags = var.tags
 }
