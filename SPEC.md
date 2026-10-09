@@ -158,7 +158,8 @@ easy half, and leaving it out keeps the apply fast.
 ### 5.1 Why the shortcut
 
 RDS is the slowest and most expensive part of the demo: ~5–10 min to create on AWS, ~80s on
-Ministack ✅, plus a subnet group, a security-group rule, and ~$12–15/mo if left running. Dropping it
+Ministack ✅, plus a subnet group, a security-group rule, and a standing monthly bill if left
+running. Dropping it
 takes the AWS apply from ~10 minutes to **~2** ✅, which is the single biggest stage-risk reduction
 available. It also deletes a whole class of "is the DB reachable" failure on conference wifi.
 
@@ -419,11 +420,12 @@ all; see [`docs/DEMO_ACCESS.md`](docs/DEMO_ACCESS.md).
 
 ### Cost guardrails
 
-**No NAT Gateway** (~$32/mo + data — the #1 demo-account bill killer): public subnets with
+**No NAT Gateway** — about **$33/month** before traffic ($0.045 per hour in AWS's own pricing example, plus $0.045 per GB processed), and the #1 demo-account bill killer: public subnets with
 `assign_public_ip`. For production the opposite is correct — private subnets plus VPC endpoints for
 `ecr.api`, `ecr.dkr`, `s3`, `logs` and `secretsmanager`, which is cheaper than NAT at this scale and
-keeps traffic off the internet. **Fargate has no free tier**; ARM64 in us-east-1 is $0.03238 per
-vCPU-hour + $0.00356 per GB-hour ≈ **1¢ per task-hour** at 0.25 vCPU / 0.5 GB. Container Insights
+keeps traffic off the internet. **Fargate has no free tier**, but four 0.25 vCPU / 0.5 GB tasks for
+the length of a talk is trivial. Per-hour rates are not quoted here because they go stale — check
+<https://aws.amazon.com/fargate/pricing/> for your region. Container Insights
 off, log retention 1 day, `desired_count` 1 except `userd`=3 during §9.2. **`terraform destroy`
 before leaving the venue.**
 

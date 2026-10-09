@@ -133,7 +133,7 @@ also why it is the easiest to scale and the right thing to put an ALB in front o
 Each of these is a trade-off, not an accident. `SPEC.md` has the reasoning.
 
 - **SQLite for the demo only — RDS is what you actually want.** RDS costs 5–10
-  minutes of every apply and ~$12–15/month if you forget to destroy it, so
+  minutes of every apply, and it bills by the hour if you forget to destroy it, so
   dropping it takes the AWS apply from ~10 minutes to ~2. That is the only
   reason it is not here; for anything handling real payments, use RDS. The
   application side is already driver-agnostic — `DB_DRIVER=postgres` plus a DSN
@@ -145,7 +145,7 @@ Each of these is a trade-off, not an accident. `SPEC.md` has the reasoning.
   (`glebarez/sqlite`), because `gorm.io/driver/sqlite` requires CGO and breaks
   the static distroless build; and **EFS is not a workaround** — SQLite's own
   docs warn that network filesystems lead to database corruption.
-- **No NAT Gateway.** ~$32/month plus data is the fastest way to bleed a demo
+- **No NAT Gateway.** At about **$33/month** before traffic ($0.045 per hour in AWS's own pricing example, plus $0.045 per GB processed), it is the fastest way to bleed a demo
   account. Public subnets with `assign_public_ip`; VPC endpoints in production.
 - **`int64` minor units for money**, never a float.
 

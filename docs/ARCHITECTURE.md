@@ -157,15 +157,31 @@ run and patch a fleet of instances that tasks are placed onto. With Fargate you
 declare CPU and memory, and AWS runs the container on infrastructure you never
 see or SSH into.
 
-**Why it is here.** There is no instance to patch, no AMI to bake, no
-autoscaling group, and no capacity to plan. For a talk that is about gRPC and
-ECS rather than about node management, it removes a whole layer of things that
-could break on stage. The honest trade-off: **Fargate has no free tier.** On
-ARM64 in us-east-1 it is $0.03238 per vCPU-hour plus $0.00356 per GB-hour —
-roughly **1¢ per task per hour** at 0.25 vCPU / 0.5 GB, so four tasks for a
-one-hour talk is a few cents. The things that would actually cost money here —
-a NAT Gateway (~$32/month), RDS, Container Insights, an ALB — are all
-deliberately absent.
+**Why it is here.** No AMI to bake, no autoscaling group, no capacity to plan.
+For a talk about gRPC and ECS rather than about node management, it removes a
+whole layer of things that could break on stage.
+
+**What AWS owns, and what you still own.** This gets stated loosely a lot, so
+precisely (AWS docs, verified 2026-10-09):
+
+- AWS owns the **platform version**, which it defines as *"a combination of the
+  kernel and container runtime versions."*
+- When a security issue affects a platform version, *"AWS creates a new patched
+  revision of the platform version **and retires tasks running on the
+  vulnerable revision**."* A task never upgrades in place — **a new task gets
+  the new revision**, so AWS will stop your task to patch underneath it.
+- **You still own everything inside the image**: base image, packages, CVEs.
+  "Serverless" is not "nobody patches".
+
+That retirement behaviour is the reason graceful shutdown is not optional here:
+your task will be replaced on someone else's schedule.
+
+**Cost.** Fargate has no free tier, but four 0.25 vCPU / 0.5 GB tasks for the
+length of a talk is a trivial amount. Rather than print per-hour rates that go
+stale, check the
+[Fargate pricing page](https://aws.amazon.com/fargate/pricing/) for your region.
+The things that would actually run up a bill here — a NAT Gateway, RDS,
+Container Insights, an ALB — are all deliberately absent.
 
 **How it is used.** `requires_compatibilities = ["FARGATE"]`, 256 CPU units and
 512 MB per task, and:
@@ -469,8 +485,8 @@ internet; a security group is a stateful allow-list attached to an ENI.
 
 - **`enable_dns_hostnames = true`** is *required* for a Cloud Map private DNS
   namespace. Miss it and service discovery silently resolves nothing.
-- **Public subnets, and no NAT Gateway.** A NAT Gateway is ~$32/month plus data
-  processing and is the most common way a demo account quietly bleeds money.
+- **Public subnets, and no NAT Gateway.** A NAT Gateway costs about **$33/month** before traffic ($0.045 per hour in AWS's own pricing example, plus $0.045 per GB processed) —
+  the most common way a demo account quietly bleeds money.
   Tasks get public IPs (`assign_public_ip = true`) so they can reach ECR,
   Secrets Manager and CloudWatch directly. **For production you would do the
   opposite:** private subnets plus VPC endpoints for `ecr.api`, `ecr.dkr`,
@@ -495,7 +511,7 @@ is a separate, empty-by-default rule locked to the operator's `/32`.
 | Missing | Why |
 |---|---|
 | **ALB** | a gRPC target group needs an **HTTPS listener plus an ACM certificate**, which means a domain. Above the cut line for a 40-minute talk. Cloud Map covers the internal hops; `gatewayd` is the one thing an ALB belongs in front of, and that is a slide, not a demo |
-| **RDS** | adds 5–10 minutes to every apply and ~$12–15/month if you forget to destroy it. Dropping it takes the AWS apply from ~10 minutes to **~2**. For anything real, use RDS: `DB_DRIVER=postgres` plus a DSN in `DB_URL` is the whole application-side switch |
+| **RDS** | adds 5–10 minutes to every apply, and bills by the hour if you forget to destroy it. Dropping it takes the AWS apply from ~10 minutes to **~2**. For anything real, use RDS: `DB_DRIVER=postgres` plus a DSN in `DB_URL` is the whole application-side switch |
 | **EFS for the SQLite file** | SQLite's own documentation warns that network filesystems cause **database corruption**. Not a cost decision — a correctness one |
 | **NAT Gateway** | see above |
 | **Container Insights** | costs money per metric; Prometheus and Jaeger cover the demo |
