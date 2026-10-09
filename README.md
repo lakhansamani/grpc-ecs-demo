@@ -77,7 +77,7 @@ Architecture and what each AWS component is for:
 | Graceful shutdown wired to ECS `stopTimeout` | [`internal/platform/grpcserver`](internal/platform/grpcserver) |
 | `grpc.health.v1` at three layers | same, plus [`cmd/healthcheck`](cmd/healthcheck) |
 | One `.proto` → Go **and** TypeScript | [`buf.gen.yaml`](buf.gen.yaml), [`clients/node`](clients/node) |
-| One module set, two targets | [`terraform/stack`](terraform/stack) vs. the two `terraform/envs/*/provider.tf` |
+| One module set, two targets | [`terraform/deployment`](terraform/deployment) vs. the two `terraform/envs/*/provider.tf` |
 | Secrets Manager injection, no keys in the image | [`terraform/modules/secrets`](terraform/modules/secrets) |
 
 ### The load-balancing bug, in one place

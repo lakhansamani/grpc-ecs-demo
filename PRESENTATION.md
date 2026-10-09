@@ -8,15 +8,18 @@ title: Running Go gRPC Services on ECS
 Plain markdown. Reads fine on GitHub as a document.
 To project it:  npx @marp-team/marp-cli PRESENTATION.md -o slides.html
 
-NOTE ON THE DIAGRAMS: the two Mermaid blocks render on GitHub. Marp does NOT
-render Mermaid. Before projecting, open the GitHub view, screenshot each
-diagram and drop the images in — or present those two slides from the GitHub
-tab.
+DIAGRAMS: the two Mermaid blocks render on GitHub. Marp does NOT render
+Mermaid. Either present slides 6 and 25 from the GitHub tab, or screenshot
+them and paste the images in. Decide before you are on stage.
+
+Slides marked [ASK] are audience-prediction beats — do not read the next
+slide until someone has answered. Slides marked [BEAT] are single-line pace
+changes; they take ten seconds.
 
 Speaker script is a SEPARATE file: PRESENTER.md
 
 Every number here came out of a terminal in this repo, or from a source quoted
-on the slide. Where something is a demo shortcut, the slide says so.
+on the slide. Where something is a shortcut, the slide says so.
 -->
 
 # Running Go gRPC services on ECS
@@ -26,6 +29,24 @@ on the slide. Where something is a demo shortcut, the slide says so.
 **Lakhan Samani** · AWS Community Day, Vadodara
 
 `github.com/lakhansamani/grpc-ecs-demo`
+
+---
+
+## Before we start, a promise
+
+Later in this talk I will show you a system where:
+
+- **Three servers are running.** All three healthy.
+- **DNS is correct.** It returns all three addresses.
+- **One of them is doing 100% of the work.**
+
+No error. No log line. No failed health check. Nothing in your dashboards.
+
+**I lost most of a day to this.** It is the single most common way a gRPC
+service gets deployed wrong, and by the end of this talk you will recognise it
+in about ten seconds.
+
+Everything else is how we get there.
 
 ---
 
@@ -39,7 +60,7 @@ on the slide. Where something is a demo shortcut, the slide says so.
 | **4 · Where it runs** | Lambda, EC2, EKS, ECS — and what Fargate really gives you |
 | **5 · The code** | One contract → three services |
 | **6 · The Terraform** | **Every AWS component, and one pipeline for laptop and prod** |
-| **7 · Running it** | Three demos |
+| **7 · Running it** | Three demos, then that bug |
 
 Parts 1–3 need no prior gRPC knowledge. **Part 6 is the heart of the talk.**
 
@@ -58,7 +79,18 @@ Everyone opens the app **at the same time**.
 
 ---
 
-## What everyone is actually doing
+## [ASK] Think about your own last sale
+
+> **How many products did you open?**
+>
+> **How many did you buy?**
+
+Hold that ratio in your head. We are about to build the architecture it
+implies.
+
+---
+
+## That ratio, as a table
 
 | What they do | How often | Does it write anything? |
 |---|---|---|
@@ -69,8 +101,8 @@ Everyone opens the app **at the same time**.
 
 Most of a sale is **people looking**. A small slice is **people buying**.
 
-You know this from your own behaviour: how many things did you open last sale,
-and how many did you actually buy?
+I am not going to put somebody else's traffic graph on a slide. **Your own
+browsing is the evidence**, and it is better evidence, because you trust it.
 
 ---
 
@@ -88,6 +120,13 @@ It is a story about **what it costs you**:
 - A slow catalogue query and a checkout bug share one deploy, one rollback and
   one on-call page
 - You cannot tune them separately, because they are the same process
+
+---
+
+## [BEAT]
+
+# Two workloads.
+# One deploy button.
 
 ---
 
@@ -131,7 +170,7 @@ graph LR
     class order,orderd w
 ```
 
-Two paths through one system. **They do not grow at the same rate.**
+Teal reads. Orange writes. **They do not grow at the same rate.**
 
 ---
 
@@ -143,12 +182,12 @@ Two paths through one system. **They do not grow at the same rate.**
 | `productsd` | Search, list, product pages | **3** |
 | `orderd` | Places orders | **1** |
 
-**How do you know the boundary is right?** A test you can apply at work:
+**How do you know the boundary is right?** A test you can use at work tomorrow:
 
 > Would these ever need a **different number of copies**, a **different deploy
 > schedule**, or a **different on-call owner**?
 >
-> If the answer is no to all three — **it is one service.**
+> **No to all three → it is one service.** Put it back.
 
 Here, search gets hammered at midnight and checkout does not. That is a yes.
 
@@ -230,6 +269,9 @@ message RequestedItem {
 - Go **client** stubs · a **REST/JSON gateway** · an **OpenAPI** spec
 - A **TypeScript** client
 
+> Nobody should write a client from a wiki page that was last accurate four
+> months ago.
+
 ---
 
 ## Let me be honest about performance
@@ -246,17 +288,28 @@ You will read that gRPC is "faster". Here is the accurate version.
 
 - For most internal services the network and your database dominate. Encoding
   is rarely the bottleneck.
-- I have **not** benchmarked it here, so I will not put a speed-up number on a
-  slide.
+- I have **not** benchmarked this repo, so I will not put a speed-up number on
+  a slide and have you quote me on it.
 
-> Performance is a genuine benefit. It is just **not usually why teams switch**
-> — and it is not something I can prove to you today.
+> Performance is a genuine benefit. It is just **not usually why teams switch**.
 
 ---
 
-## What I *can* prove: streaming is not the point
+## [ASK] So people say gRPC is for streaming
 
-I counted the RPCs in the real `.proto` files of 14 well-known projects:
+I counted every RPC in the real `.proto` files of **14 projects you have heard
+of** — Temporal, etcd, containerd, Kubernetes CRI, Milvus, Qdrant, TiKV, Dapr,
+CockroachDB, Vitess, Thanos, Bazel, Envoy, OpenTelemetry.
+
+**611 RPCs in total.**
+
+> ### What percentage use streaming?
+>
+> Shout out a number.
+
+---
+
+## About 8%
 
 | | RPCs | Use streaming |
 |---|---|---|
@@ -268,25 +321,14 @@ I counted the RPCs in the real `.proto` files of 14 well-known projects:
 | Envoy xDS | 2 | **2** (100%) |
 | **All 14 together** | **611** | **50 — about 8%** |
 
-Protos are in `docs/evidence/`. The counts reproduce with one `grep` — please
-check them.
+Protos are in `docs/evidence/`. The counts reproduce with one `grep` — **please
+go check me.**
 
-**So:** streaming is a specialist tool, not the reason to adopt gRPC. And **not
-one** of these 14 exposes gRPC to the public internet. What you are most likely
-adopting is a **typed, versioned contract between your own services**.
+**Two conclusions.** Streaming is a specialist tool, not the reason to adopt
+gRPC. And **not one** of these 14 exposes gRPC to the public internet.
 
----
-
-## When gRPC, and when REST
-
-| Use gRPC when | Use REST when |
-|---|---|
-| Services call **each other**, inside your network | A **browser** is the client |
-| You want one contract in several languages | A third party integrates with you |
-| Breaking a field should fail **CI**, not production | `curl` and a browser tab must just work |
-| The call is a **function** | Public, cacheable, bookmarkable URLs |
-
-**Usually you need both.** It is a question of *where*, not of which is better.
+What you are most likely adopting is a **typed, versioned contract between your
+own services**.
 
 ---
 
@@ -296,6 +338,10 @@ adopting is a **typed, versioned contract between your own services**.
 
 Not a configuration problem. A browser cannot open a raw HTTP/2 connection and
 control trailers the way gRPC requires.
+
+gRPC is for the calls *inside* your network. The moment a client is a browser
+or a third party, you need REST — so **usually you need both**, and the only
+question is where the line sits.
 
 So something has to translate. **Three real options:**
 
@@ -312,26 +358,28 @@ for an intermediary proxy (such as Envoy)."*
 
 ## So do we actually need `gatewayd`?
 
-**No. It is a choice — here is the honest trade-off.**
+# No.
 
-I picked option 1 because it makes the lesson **visible**: `gatewayd` is a
+It is a choice. Here is the honest trade-off.
+
+**Why I picked option 1:** it makes the lesson *visible*. `gatewayd` is a
 separate ECS service with its own task definition, so you watch a stateless
 service deploy next to stateful ones.
 
 **If I were starting a product today**, option 3 is very attractive: one port,
-no extra hop, nothing extra to operate, and the browser talks to your service
-directly. The TypeScript client in this repo already uses
-`@connectrpc/connect`.
+no extra hop, nothing extra to operate. The TypeScript client in this repo
+already uses `@connectrpc/connect`.
 
-**When a gateway process still earns its place:**
+**When a gateway process still earns its keep:**
 
 - You want **one** public door to audit, rate-limit and put a WAF in front of
 - Your services must stay plain gRPC, because another team owns them
-- You need request shaping that does not belong inside any one service
 
 ---
 
-## And no — not every RPC needs REST
+## And do we need REST for every API?
+
+# Also no.
 
 Of the 10 RPCs in this repo, **9 have a REST route. One does not.**
 
@@ -340,18 +388,24 @@ Of the 10 RPCs in this repo, **9 have a REST route. One does not.**
 rpc CheckAvailability(CheckAvailabilityRequest) returns (CheckAvailabilityResponse);
 ```
 
-| | |
-|---|---|
-| **Gets REST** | The 9 a browser genuinely calls — register, login, me, list/get/search products, create/get/list orders |
-| **Does not** | `CheckAvailability`. `orderd` calls it to price a cart. **Nothing outside should.** |
+`orderd` calls `CheckAvailability` to price a cart. **Nothing outside should.**
 
 ```
 REST  -> 404
 gRPC  -> works
 ```
 
-**The rule:** a REST route exists for a client you do **not** control. Expose
-exactly those. Four lines of annotation are the entire difference.
+So the proto itself is the access-control decision, and you can read it in a
+code review.
+
+**One nuance worth seeing:** `VerifyToken` is *both*. It is
+`GET /v1/users/me` for the browser **and** the internal hop `orderd` makes on
+every order. Same RPC, same implementation, two callers — which is fine. The
+annotation decides who can *reach* it, not who it is *for*.
+
+> **The rule:** a REST route exists for a client you do **not** control. Expose
+> exactly those. Four lines of annotation are the entire difference between an
+> internal and a public API.
 
 ---
 
@@ -368,7 +422,7 @@ exactly those. Four lines of annotation are the entire difference.
 
 gRPC needs a **process that stays listening**, holding an HTTP/2 connection.
 Lambda has none. From the AWS load balancer docs on gRPC target groups,
-**verbatim**:
+**word for word**:
 
 > "The only supported target types are `instance` and `ip`."
 > "**You can't use Lambda functions as targets.**"
@@ -389,6 +443,18 @@ must run on-prem too.
 
 > Moving later is **not a rewrite.** The container, the contract, the health
 > check and the graceful shutdown all come with you. Only the YAML changes.
+>
+> *"For now"* is a legitimate engineering answer. *"Forever"* rarely is.
+
+---
+
+## [ASK] A question about Fargate
+
+Your container is running on Fargate. There is a kernel underneath it.
+
+> ### Who patches that kernel?
+>
+> And — **what happens to your running task when they do?**
 
 ---
 
@@ -399,9 +465,7 @@ no longer have to provision, configure, or scale clusters of virtual
 machines."*
 
 **AWS owns** the *platform version*, which AWS defines as *"a combination of
-the kernel and container runtime versions."*
-
-**And here is the part people miss:**
+the kernel and container runtime versions."* So AWS patches it. But:
 
 > "If a security issue is found that affects an existing platform version, AWS
 > creates a new patched revision of the platform version **and retires tasks
@@ -410,11 +474,13 @@ the kernel and container runtime versions."*
 **AWS will stop your task to patch underneath you.** A task never upgrades in
 place — a *new* task gets the new revision.
 
-**You still own** everything **inside** your image: your base image, your
-packages, your CVEs. *Serverless does not mean nobody patches.*
+**And you still own** everything **inside** your image: your base image, your
+packages, your CVEs.
 
-> Which is why graceful shutdown is not optional. Your task **will** be
-> replaced on someone else's schedule.
+> **Serverless does not mean nobody patches.** It means AWS patches their half,
+> kills your task to do it, and you still patch yours.
+>
+> Which is why graceful shutdown is not optional. Remember that.
 
 ---
 
@@ -463,36 +529,11 @@ graph TB
     class gw,cm g
 ```
 
-One set of `.proto` files generates the Go servers, the Go clients, `gatewayd`,
-the OpenAPI spec and the TypeScript client.
+**Nobody in this diagram knows anybody's IP address.** They dial names.
 
 ---
 
-## One order, end to end
-
-```
-POST /v1/orders  { items: [{productId, quantity}], idempotencyKey }
-        |
-        v
-   gatewayd ──gRPC──> orderd.CreateOrder
-                         |
-                         ├──> userd.VerifyToken            who is this?
-                         |      <── User{id, name}
-                         |
-                         ├──> productsd.CheckAvailability   price + stock
-                         |      <── per-item price, stock
-                         |
-                         ├─ total computed from CATALOGUE prices
-                         └─ persist, return Order{CONFIRMED, total}
-```
-
-Two outbound hops on the write path. **Both gRPC. Neither public.**
-
----
-
-## Two contract decisions worth arguing about
-
-**1 · The order request carries no price.**
+## The request has no price in it
 
 ```protobuf
 message RequestedItem { string product_id = 1; int32 quantity = 2; }
@@ -501,21 +542,72 @@ message RequestedItem { string product_id = 1; int32 quantity = 2; }
 The client sends *what* and *how many*. `orderd` asks `productsd` what it
 costs.
 
-Think about the alternative during a sale: if the client sends the price, a
-client can ask *"is this ₹2,000 sale price real?"* and then submit ₹200.
+**Think about the alternative during a sale.** If the client sends the price,
+then a client can ask *"is this ₹2,000 sale price real?"* — and then submit
+₹200.
 
-**2 · "Out of stock" is not an error.**
+---
+
+## [ASK] You tap "Buy". The spinner spins.
+
+Midnight, sale traffic, patchy 4G. Your phone sends the order and the response
+never comes back.
+
+So your phone retries. Reasonably — it has no idea whether the server got it.
+
+> ### Did you just buy one phone, or two?
+
+---
+
+## That is what an idempotency key is for
+
+The client makes up a unique string per *intent to buy* and sends it with the
+order:
+
+```protobuf
+message CreateOrderRequest {
+  repeated RequestedItem items  = 1;
+  string idempotency_key        = 2;   // required
+}
+```
+
+**The server's deal:** *"Send me the same key twice and you get the same order
+back — I will not create a second one."*
+
+```
+first call   -> Order abc123, idempotentReplay = false
+same key     -> Order abc123, idempotentReplay = true    <- no second order
+```
+
+Three details that matter in the code:
+
+- **Required.** No key → `InvalidArgument`. A retry-unsafe order API is a bug.
+- **Namespaced per user** (`userID + ":" + key`), so two shoppers cannot
+  collide on `"cart-1"`.
+- **A unique index backs it**, not just an `if`. Two simultaneous retries race;
+  one loses, catches the duplicate-key error, and returns the stored order.
+
+> The check alone is not enough. **The database constraint is what makes it
+> true.**
+
+---
+
+## And "out of stock" is not an error
 
 ```
 CreateOrder → OK, status = REJECTED, reason = OUT_OF_STOCK
 ```
 
-Not `codes.Internal`. Not a 500. Status codes stay for *unauthenticated*,
-*invalid argument*, *unavailable*. Business outcomes are an **enum** in the
-response, so clients branch on a value — never on an error string.
+Not `codes.Internal`. Not a 500.
 
-> `if strings.Contains(err.Error(), "stock")` means a reworded message breaks
-> production.
+gRPC status codes stay for what they are for: *unauthenticated*, *invalid
+argument*, *unavailable*. Business outcomes are an **enum** in the response, so
+clients branch on a value — never on an error string.
+
+> `if strings.Contains(err.Error(), "stock")` means that somebody rephrasing a
+> message breaks production.
+>
+> **An enum cannot be rephrased.**
 
 ---
 
@@ -524,10 +616,13 @@ response, so clients branch on a value — never on an error string.
 `userd` and `productsd` run 3 copies because their database is **baked into the
 image** — every copy is identical, so any copy can answer any read.
 
-`orderd` runs **1**, and I want to be precise about why:
+`orderd` runs **1**, and I want to be precise about why, because I used to say
+this badly:
 
-> Not "because it writes". **Because it writes to a file inside the task.**
-> Three copies would be three different databases.
+> **Not** "because it writes". Writers scale fine.
+>
+> **Because it writes to a file inside the task.** Three copies would be three
+> different databases.
 
 **Give it a managed database and `orderd` scales like the others.** SQLite on
 the task is a demo shortcut that keeps the AWS deploy at ~2 minutes instead of
@@ -553,7 +648,7 @@ terraform/
 │   ├── secrets/        the shared JWT secret
 │   └── ecs-service/    task definition + service + Cloud Map registration
 │
-├── stack/              THE WHOLE DEPLOYMENT — shared verbatim
+├── deployment/         THE WHOLE DEPLOYMENT — identical in both envs
 │   └── main.tf         wires the modules; instantiates ecs-service x4
 │
 └── envs/
@@ -561,8 +656,9 @@ terraform/
     └── aws/            provider.tf  <- the only difference
 ```
 
-`ecs-service` is instantiated **four times**. `protocol = "grpc" | "http"`
-switches the port mapping and which mode the baked-in health probe uses.
+`ecs-service` is instantiated **four times**. One `protocol = "grpc" | "http"`
+variable switches the port mapping and the health-check mode — so the three
+gRPC services and the HTTP gateway come out of the **same module**.
 
 ---
 
@@ -570,7 +666,7 @@ switches the port mapping and which mode the baked-in health probe uses.
 
 | Component | Resource | Why it is here |
 |---|---|---|
-| **VPC** | `aws_vpc` | Private network. `enable_dns_hostnames` is **required** for Cloud Map. |
+| **VPC** | `aws_vpc` | `enable_dns_hostnames` is **required** for Cloud Map. Miss it and discovery silently resolves nothing. |
 | **Subnets** ×2 | `aws_subnet` | Two availability zones. |
 | **Internet Gateway** | `aws_internet_gateway` | Tasks reach ECR, Secrets Manager, CloudWatch. |
 | **Route table** | `aws_route_table` + assoc | `0.0.0.0/0` → IGW. |
@@ -598,23 +694,22 @@ switches the port mapping and which mode the baked-in health probe uses.
 | **Execution role** | the **ECS agent** | **Before** your code runs: pull the image, resolve secrets, create log streams |
 | **Task role** | **your process** | At runtime. The AWS SDK picks it up by itself. |
 
-Get this wrong and your task fails to start with an error pointing at the wrong
-role.
+Get these backwards and your task fails to start with an error pointing at the
+wrong role. It is a genuinely confusing hour.
 
 Here the **task role is empty on purpose** — these services call no AWS API at
-runtime. Nothing is granted "just in case".
+runtime. Nothing granted "just in case".
 
 ```sh
 docker inspect <task> | grep AWS_CONTAINER_CREDENTIALS
 # AWS_CONTAINER_CREDENTIALS_FULL_URI=http://.../v2/credentials/46e1d1eb-...
 ```
 
-That one variable is the whole "no API keys on ECS" story. **You never created
-a key, so there is none to leak.**
+> **You never created a key, so there is none to leak.**
 
 ---
 
-## Cloud Map is just DNS — and that matters
+## Cloud Map is just DNS
 
 `orderd` knows no IP addresses. It dials a **name**:
 
@@ -631,12 +726,40 @@ dns_records { type = "A"  ttl = 10 }   # low TTL, so scale-out is seen fast
 health_check_custom_config { failure_threshold = 1 }
 ```
 
-> That last block looks like dead weight. **Removing it broke everything.** An
-> *empty* block makes the provider send no health config at all, so Cloud Map
-> never accepts ECS's health reports, every instance stays UNHEALTHY — and
-> unhealthy instances are **excluded from DNS**. Four tasks running, zero
-> addresses returned. The comment in that file now says, in capitals, do not
-> clean it up.
+---
+
+## A story about that last block
+
+I had a deprecation warning on `failure_threshold`. So I tidied it up — left
+the block empty. Then deployed.
+
+**What I saw:**
+
+```
+rpc error: code = Unavailable desc = ... "no children to pick from"
+```
+
+**What I checked, all of which looked fine:**
+
+- 4 tasks `RUNNING` ✅
+- 4 Cloud Map services, all present ✅
+- VPC DNS hostnames enabled ✅
+- Security groups correct ✅
+
+**The cause:** an *empty* block makes the provider send **no health config at
+all**. Cloud Map then never accepts ECS's health reports → every instance stays
+`UNHEALTHY` → **unhealthy instances are excluded from DNS answers**.
+
+Four healthy tasks. Zero addresses returned.
+
+> The comment in that file now says, in capitals, **do not clean this up.**
+
+---
+
+## [BEAT]
+
+# One command.
+# It is the whole talk.
 
 ---
 
@@ -645,8 +768,6 @@ health_check_custom_config { failure_threshold = 1 }
 ```sh
 diff terraform/envs/local/provider.tf terraform/envs/aws/provider.tf
 ```
-
-**That diff is the whole talk.**
 
 ```hcl
 # envs/local/provider.tf                 # envs/aws/provider.tf
@@ -664,15 +785,17 @@ provider "aws" {                         provider "aws" {
 }
 ```
 
-Everything describing the deployment lives in `terraform/stack/` and is shared
-**verbatim**. Not a copy. Not a simplified local version. **The same files.**
+Everything describing the deployment lives in `terraform/deployment/`. Not a
+copy. Not a simplified local version. **Both environments load the same
+files.**
 
 > That is the argument for emulating locally instead of keeping a second set of
-> local manifests: **there is no second set to drift.**
+> "local" manifests: **there is no second set to drift.** Change a task
+> definition and you change it once.
 
 ---
 
-## How the laptop part works — and where it is honest
+## Where the laptop version is honest
 
 **Ministack** (MIT) emulates ECS by launching **real Docker containers**, plus
 ECR, Cloud Map, Secrets Manager and SSM. LocalStack's free Community edition
@@ -681,7 +804,7 @@ ended 2026-03-23, and ECS was never in it.
 **Real locally:** the Terraform, the task definitions, `awsvpc` networking,
 secret injection, health checks, graceful shutdown, metrics, traces.
 
-**Where I substitute — and say so on stage:**
+**Where I substitute — and I will say so on stage:**
 
 | Gap | Stand-in |
 |---|---|
@@ -690,7 +813,7 @@ secret injection, health checks, graceful shutdown, metrics, traces.
 | `healthStatus` / `launchType` not echoed back | Real ECS reports `HEALTHY` / `FARGATE`. |
 
 > Naming the emulator's limits yourself is more credible than being caught by
-> them — and it is exactly why this also deploys to real AWS.
+> them.
 
 ---
 
@@ -701,8 +824,6 @@ secret injection, health checks, graceful shutdown, metrics, traces.
 ```sh
 make ps
 ```
-
-Seven escalating proofs. Two of them settle it.
 
 **The task describes itself** — nothing in our code sets this:
 
@@ -769,28 +890,97 @@ terraform destroy   # before leaving the venue
 
 ---
 
-## One thing to know before you ship gRPC on ECS
+# Now, the promise from slide 2
 
-Not a demo — just the most useful thing I learned building this.
+## The setup
 
-**gRPC's default load-balancing policy is `pick_first`.** It resolves the name,
-connects to **one** address, and sends everything down that connection.
+`userd` is scaled to **3 tasks**.
 
-So you scale to three tasks and **one task can take all the traffic.** Nothing
-warns you: no error, no log line, no failed health check. Measured here:
-**120 of 120 requests landed on one task.**
+| Check | Result |
+|---|---|
+| Tasks running | **3 of 3** ✅ |
+| Cloud Map instances healthy | **3 of 3** ✅ |
+| DNS answer for `userd.ecom.local` | **3 A records** ✅ |
+| Client configured with a load balancer | not needed — gRPC does this itself |
 
-The fix is two settings, and **either alone does nothing**:
+I send **120 requests** through `orderd`, and every one of them makes `orderd`
+call `userd`.
+
+---
+
+## [ASK] Where does the traffic go?
+
+> ### 120 requests. Three healthy tasks.
+>
+> ### How many land on each one?
+
+Shout out the split.
+
+---
+
+## 120 / 0 / 0
+
+```
+task 10e77597   120 calls     <- all of them
+task 90c7be3b     0
+task 02e3010a     0
+```
+
+Measured in this repo.
+
+No error. No log line. No failed health check. Every dashboard green.
+
+**Everybody's first conclusion is that service discovery is broken.**
+
+It is not. Discovery did its job perfectly — it handed back three addresses.
+
+> ## The client never asked to balance.
+
+---
+
+## Why: `pick_first`
+
+gRPC's default load-balancing policy is `pick_first`:
+
+1. Resolve the name → get three addresses
+2. Connect to **one** of them
+3. Send **every** request down that one connection, forever
+
+**And that default is reasonable!** With HTTP/2 one connection multiplexes many
+requests, so opening more looks wasteful. It optimises for a world where the
+other end is a **single load balancer**.
+
+On ECS the other end is **three tasks with three IPs**.
+
+> The default is not a bug. It is a correct answer to a different question.
+
+---
+
+## The fix is two halves. Either alone does nothing.
 
 ```go
-grpc.NewClient("dns:///userd.ecom.local:50051",      // <- dns:/// matters
+// CLIENT — ask for balancing, AND use a resolver that returns every address.
+grpc.NewClient("dns:///userd.ecom.local:50051",
     grpc.WithDefaultServiceConfig(
         `{"loadBalancingConfig":[{"round_robin":{}}]}`))
 ```
 
-A bare `host:port` uses the *passthrough* resolver and yields exactly **one**
-address — so `round_robin` has nothing to balance over. Plus `MaxConnectionAge`
-on the server, so clients re-resolve after a scale-out.
+**`dns:///` is not decoration.** A bare `host:port` uses the *passthrough*
+resolver, which hands the name straight to the dialer and yields exactly
+**one** address — so `round_robin` has nothing to balance over.
+
+> That is the version that **looks** fixed and is not.
+
+```go
+// SERVER — recycle connections so clients re-resolve after a scale-out.
+grpc.KeepaliveParams(keepalive.ServerParameters{
+    MaxConnectionAge:      30 * time.Second,
+    MaxConnectionAgeGrace: 5 * time.Second,
+})
+```
+
+Without the server half, a client connected **before** you scaled out never
+learns the new tasks exist. Which is exactly when you scale: during the sale.
 
 With both: **40 / 40 / 40.**
 
@@ -807,11 +997,24 @@ With both: **40 / 40 / 40.**
 4. **A gateway is a choice, not a requirement.** ConnectRPC gives you one port
    and no gateway at all.
 5. **Fargate does not mean nobody patches.** AWS patches the platform *and
-   retires your tasks to do it.* You still own your image.
+   retires your tasks to do it.*
 6. **One Terraform stack, two provider blocks.** There is no second set of
    manifests to drift.
 7. **`pick_first` is the default.** Three tasks and one gets everything is the
    *normal* outcome.
+
+---
+
+## The one I would tattoo on the back of my hand
+
+# Green dashboards are not the same thing as working.
+
+Four tasks running, four Cloud Map services, DNS enabled — and zero addresses
+returned.
+
+Three healthy tasks, correct DNS — and one of them doing everything.
+
+**Both looked perfectly fine.** Deploy it once before you trust it.
 
 ---
 

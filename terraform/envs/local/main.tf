@@ -1,7 +1,7 @@
 # LOCAL environment: the same stack, pointed at the Ministack emulator.
 #
 # Compare with ../aws/main.tf. They differ ONLY in the provider block.
-# Everything describing the deployment lives in ../stack, shared verbatim.
+# Everything describing the deployment lives in ../../deployment, unchanged.
 
 # Exposed so the guard is demonstrable:
 #   terraform plan -var order_desired_count=3   -> refused, with the reason
@@ -19,14 +19,14 @@ variable "product_desired_count" {
 }
 
 # `-var lb_policy=pick_first` redeploys orderd with the bug, so the
-# load-balancing segment has a "before" to show. See ../../stack/main.tf.
+# load-balancing segment has a "before" to show. See ../../deployment/main.tf.
 variable "lb_policy" {
   type    = string
   default = "round_robin"
 }
 
-module "stack" {
-  source = "../../stack"
+module "deployment" {
+  source = "../../deployment"
 
   environment        = "local"
   aws_region         = "us-east-1"
@@ -56,7 +56,7 @@ module "stack" {
   enable_service_discovery = false
 }
 
-output "cluster_name" { value = module.stack.cluster_name }
-output "namespace" { value = module.stack.namespace }
-output "service_addresses" { value = module.stack.service_addresses }
-output "ecr_repository_urls" { value = module.stack.ecr_repository_urls }
+output "cluster_name" { value = module.deployment.cluster_name }
+output "namespace" { value = module.deployment.namespace }
+output "service_addresses" { value = module.deployment.service_addresses }
+output "ecr_repository_urls" { value = module.deployment.ecr_repository_urls }

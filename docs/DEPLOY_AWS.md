@@ -72,7 +72,7 @@ cd terraform/envs/aws
 terraform init
 
 terraform apply \
-  -target=module.stack.module.ecr \
+  -target=module.deployment.module.ecr \
   -var user_image=placeholder -var product_image=placeholder \
   -var order_image=placeholder -var gateway_image=placeholder
 

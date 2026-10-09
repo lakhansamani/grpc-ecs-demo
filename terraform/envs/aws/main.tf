@@ -60,8 +60,8 @@ variable "lb_policy" {
   description = "pick_first redeploys orderd with the load-balancing bug, for the live demo."
 }
 
-module "stack" {
-  source = "../../stack"
+module "deployment" {
+  source = "../../deployment"
 
   lb_policy = var.lb_policy
 
@@ -94,8 +94,8 @@ module "stack" {
   enable_execute_command      = var.enable_execute_command
 }
 
-output "cluster_name" { value = module.stack.cluster_name }
-output "namespace" { value = module.stack.namespace }
-output "service_addresses" { value = module.stack.service_addresses }
-output "ecr_repository_urls" { value = module.stack.ecr_repository_urls }
-output "jwt_secret_name" { value = module.stack.jwt_secret_name }
+output "cluster_name" { value = module.deployment.cluster_name }
+output "namespace" { value = module.deployment.namespace }
+output "service_addresses" { value = module.deployment.service_addresses }
+output "ecr_repository_urls" { value = module.deployment.ecr_repository_urls }
+output "jwt_secret_name" { value = module.deployment.jwt_secret_name }

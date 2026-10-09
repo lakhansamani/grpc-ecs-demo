@@ -1,4 +1,4 @@
-# The whole deployment, shared verbatim by envs/local and envs/aws.
+# The whole deployment. envs/local and envs/aws both use this, unchanged.
 #
 # This file is the point of the talk: it is byte-identical between the two
 # environments. The ONLY difference lives in each env's provider.tf - fake

@@ -5,17 +5,26 @@ to say, what to type, and what to do when it breaks.
 
 ## Pick your runtime first
 
-The full deck is **37 slides ≈ 55 minutes**. It does not fit in 40. Choose a
+The full deck is **50 slides ≈ 55 minutes**. It does not fit in 40. Choose a
 path before you walk in and mark your copy.
 
-| Slot | Path | Drop these slides |
+Six slides are deliberately fast: `[ASK]` slides are audience questions (20–30
+seconds, but **do not advance until someone answers**) and `[BEAT]` slides are
+single lines you let land (10 seconds).
+
+| Slot | Path | Drop |
 |---|---|---|
 | **55 min** | Everything | — |
-| **40 min** | Core | 10, 14, 23, 31 (fold one line of each into its neighbour) and cut `make dev-rest` from Demo 2 |
-| **30 min** | Spine only | Also drop 12, 16, 20, 25, 28, and Demo 3 (describe it instead) |
+| **40 min** | Core | 3, 13, 25, 31, 39 · and cut `make dev-rest` from Demo 2 |
+| **30 min** | Spine | Also 15, 19, 24, 34, 36 · and Demo 3 (describe it) |
 
-**Never drop:** 6 (use-case diagram), 7 (the boundary test), 22 (architecture),
-27 (every AWS component), 30 (one pipeline), 32 (Demo 1), 35 (`pick_first`).
+**Never drop:** 2 (the promise), 9 (use-case diagram), 10 (the boundary test),
+16+17 (the streaming ASK), 27 (no price in the request), 33 (every AWS
+component), 38 (one pipeline), 40 (Demo 1), 43–47 (the payoff), 49 (the closing
+line).
+
+**The spine, if you only get 20 minutes:** 2 → 9 → 10 → 27 → 33 → 38 → 40 →
+43 → 44 → 45 → 47 → 49.
 
 Timings below are for the **55-minute** run.
 
@@ -82,24 +91,42 @@ read-only `make ps-aws`. Never run a cold `apply` on venue wifi.
 
 ---
 
-## Slide 2 · Where we are going
+## Slide 2 · Before we start, a promise
 
-**0:45 · 1:45**
+**1:15 · 2:15 · NEVER CUT**
 
-Give people a map and permission to be at whatever level they're at.
+**This is the hook for the entire talk.** You are opening a loop you close on
+slide 45. Deliver it slowly and do not explain it yet.
 
-> "The first three parts need no gRPC knowledge. Part six — the Terraform — is
-> the heart of this talk, and it's where I'd most want you awake."
+> "Before anything else, let me tell you where we're going.
+>
+> Later I'll show you a system where three servers are running. All three
+> healthy. DNS is correct — it hands back all three addresses. And one of them
+> is doing a hundred percent of the work.
+>
+> No error. No log line. No failed health check. Nothing in your dashboards."
 
-Don't dwell. It's a map, not content.
+Pause. Then make it personal — this is what buys their attention:
+
+> "I lost most of a day to this. By the end of this talk you'll recognise it in
+> about ten seconds. Everything in between is how we get there."
 
 ---
 
-## Slide 3 · It is sale season
+## Slide 3 · Where we are going
 
-**1:15 · 3:00**
+**0:45 · 3:00 · 🔶 first to cut**
 
-**This is the hook. Slow down.**
+> "First three parts need no gRPC knowledge. Part six — the Terraform — is the
+> heart of this talk."
+
+A map, not content. Don't dwell.
+
+---
+
+## Slide 4 · It is sale season
+
+**1:15 · 4:15**
 
 > "It's sale season. Big Billion Days, Great Indian Festival — whichever one is
 > running right now. Honestly, how many of you have a tab open?
@@ -107,99 +134,110 @@ Don't dwell. It's a map, not content.
 > Midnight. The banner goes live. And everybody opens the app at the same
 > moment."
 
-Ask and **actually wait for hands.** Five seconds, and it buys you the room.
+Ask and **actually wait for hands.** Five seconds; it buys you the room.
 
 ---
 
-## Slide 4 · What everyone is actually doing
+## Slide 5 · [ASK] Think about your own last sale
 
-**1:30 · 4:30**
+**0:45 · 5:00**
 
-Walk the table. The last row is the point.
+**Do not advance until you get answers.** Ask it as two separate questions and
+let the gap between the numbers do the work.
 
-> "Search. Scroll. Compare. Open a product page. Add to cart and then go look at
-> one more thing. And then — far less often — somebody actually buys."
+> "Quick question, and be honest. Your last sale — how many products did you
+> *open*?" *(wait, take a couple of shouted numbers)*
+>
+> "And how many did you actually *buy*?" *(wait — the answers are small)*
 
-Make it personal, because it's unarguable:
-
-> "Think about your own last sale. How many things did you open? How many did
-> you buy? That ratio is the whole architecture."
-
-**Say that you are not quoting anyone's numbers:**
-
-> "I'm not putting Flipkart's traffic graphs on a slide — I don't have them, and
-> I'm not Flipkart. I don't need them. The *shape* is the argument."
+> "Hold that ratio. We're about to build the architecture it implies."
 
 ---
 
-## Slide 5 · Suppose the store is one application
+## Slide 6 · That ratio, as a table
 
-**1:30 · 6:00**
+**1:15 · 6:15**
 
-Be generous to the monolith. People here ship monoliths, and some are right to.
+Walk the rows; the last one is the point.
+
+> "Search, scroll, compare, add to cart and wander off. And then, far less
+> often, somebody buys."
+
+**Say why there are no third-party numbers here:**
+
+> "I'm not putting somebody else's traffic graph on a slide. I don't have
+> Flipkart's numbers, and I don't need them — your own browsing is better
+> evidence, because you actually trust it."
+
+---
+
+## Slide 7 · Suppose the store is one application
+
+**1:30 · 7:45**
+
+Be generous to the monolith. People here ship monoliths, and some should.
 
 > "One deployment. Traffic multiplies, you scale up, and **it works.** This
-> isn't a story about somebody being stupid."
+> isn't a story about anybody being stupid."
 
-Then the three costs. The second lands hardest with senior people:
+Then the three costs. The middle one lands hardest with senior people:
 
 > "You're scaling checkout in order to survive search. A slow catalogue query
 > and a checkout bug share one deploy, one rollback, one on-call page. And you
-> can't tune them separately, because they're the same process."
+> can't tune them separately — same process."
 
 ---
 
-## Slide 6 · The overall picture
+## Slide 8 · [BEAT] Two workloads. One deploy button.
 
-**1:30 · 7:30 · NEVER CUT**
+**0:10 · 7:55**
 
-Switch to the GitHub tab (or your screenshot). **Trace it with your finger.**
-
-> "Shopper, three things they do. Two are reads — search and browse, and log in.
-> One is a write — place an order.
->
-> Teal is the read path. Orange is the write path. And see this bit: when you
-> place an order, `orderd` turns around and asks the other two — who is this,
-> and what does this cost.
->
-> And down here is me, with Terraform — **one pipeline that points at my laptop
-> or at production.** That's part six."
-
-Land it:
-
-> "Two paths through one system. **They do not grow at the same rate.**"
+Say it. Stop. Let it sit for two seconds. Advance.
 
 ---
 
-## Slide 7 · So: three services
+## Slide 9 · The overall picture
 
-**2:00 · 9:30 · NEVER CUT**
+**1:30 · 9:25 · NEVER CUT**
 
-This answers "why not a monolith" *and* "why not twelve services" at once.
+GitHub tab (or your screenshot). **Trace it with your finger.**
 
-> "Reads here, reads here, writes there."
+> "Shopper, three things they do. Two are reads — browse, and log in. One is a
+> write — place an order. Teal reads, orange writes.
+>
+> And see this bit: placing an order makes `orderd` turn around and ask the
+> other two — who is this, and what does this cost.
+>
+> Down here is me, with Terraform — one pipeline pointing at my laptop *or* at
+> production. That's part six."
 
-**Then give them the test, slowly** — it's the thing they can use on Monday:
+---
 
-> "How do you know that's the right boundary? Here's a test you can use at work.
-> Ask: would these ever need a different number of copies, a different deploy
+## Slide 10 · So: three services
+
+**2:00 · 11:25 · NEVER CUT**
+
+Answers "why not a monolith" *and* "why not twelve services" at once.
+
+**Give them the test slowly** — it's the thing they can use on Monday:
+
+> "How do you know that's the right boundary? A test you can use at work. Ask:
+> would these ever need a different number of copies, a different deploy
 > schedule, or a different on-call owner?
 >
-> If it's no to all three — **it's one service.** Put it back."
+> **No to all three — it's one service.** Put it back."
 
 Then pay the cost out loud, so nobody thinks you're selling microservices:
 
-> "Every split costs you a network hop, a new failure mode, and another thing to
+> "Every split costs you a network hop, a failure mode, and another thing to
 > deploy. Three is what *this* use case pays for. If yours pays for two, build
 > two."
 
 ---
 
-## Slide 8 · But now they have to talk
+## Slide 11 · But now they have to talk
 
-**0:45 · 10:15**
-
-Short bridge. Don't linger.
+**0:45 · 12:10**
 
 > "One order needs two questions answered by other services. Inside one app
 > those were function calls. Now they cross a network. So — how should services
@@ -207,43 +245,40 @@ Short bridge. Don't linger.
 
 ---
 
-## Slide 9 · What gRPC is
+## Slide 12 · What gRPC is
 
-**1:30 · 11:45**
+**1:30 · 13:40**
 
-**Lead with the definition. Never with the joke.**
+**Lead with the definition. Never the joke.**
 
 > "gRPC lets you call a function that lives on another machine, as if it were
 > local. You write the function down — name, inputs, outputs — in a file, and a
-> compiler turns that file into real code for both sides."
+> compiler turns that into real code for both sides."
 
 *Then* the acronym, as a throwaway:
 
-> "RPC is Remote Procedure Call. The `g`… officially stands for 'gRPC'. The
-> acronym contains itself — they reassign it every release as a joke."
-
-🔶 **40-min path:** fold slide 10's code contrast in here and skip slide 10.
+> "The `g`… officially stands for 'gRPC'. The acronym contains itself. They
+> reassign it every release as a joke."
 
 ---
 
-## Slide 10 · The mental shift
+## Slide 13 · The mental shift
 
-**1:30 · 13:15 · 🔶 first to cut**
+**1:30 · 15:10 · 🔶 second to cut**
 
-Read both code blocks aloud. The contrast does the work.
+Read both blocks aloud. The contrast does the work.
 
-> "With REST you think about resources and verbs. What's the right noun? POST or
-> PUT? Which status code? With gRPC you think about functions. What does it
-> take, what does it give back.
->
-> That's the whole shift. HTTP/2, binary encoding, codegen — all machinery
-> serving that one idea."
+> "REST makes you think about resources and verbs — what's the right noun, POST
+> or PUT, which status code. gRPC makes you think about functions — what does
+> it take, what does it give back."
+
+🔶 If cutting, say that one sentence on slide 12.
 
 ---
 
-## Slide 11 · You write the contract, a compiler writes the code
+## Slide 14 · You write the contract, a compiler writes the code
 
-**1:30 · 14:45**
+**1:30 · 16:40**
 
 > "This proto file is the only hand-written interface code in the project. One
 > command turns it into five things."
@@ -253,53 +288,59 @@ The line that matters most to someone junior:
 > "Forget to implement an RPC and the Go code **will not compile**. That's not a
 > runtime 501 you find in production — it's a build failure on your laptop."
 
-And the honest reason teams adopt it:
-
-> "Nobody should be writing a client from a wiki page that was last accurate
-> four months ago."
-
 ---
 
-## Slide 12 · Let me be honest about performance
+## Slide 15 · Let me be honest about performance
 
-**1:30 · 16:15 · 🔶 cut at 30 min**
+**1:30 · 18:10 · 🔶 cut at 30 min**
 
-**This slide buys you credibility for the whole talk.** Someone here has read
-"gRPC is 7x faster" and is ready to either repeat it or challenge you.
+**This slide buys credibility for the whole talk.** Someone here has read "gRPC
+is 7x faster" and is ready to repeat it or challenge you.
 
-> "You'll read that gRPC is faster. Here's the accurate version. The advantages
-> are real and structural: binary Protobuf instead of JSON, one multiplexed
-> HTTP/2 connection instead of one per call, and headers that aren't re-sent in
-> full every time.
+> "The advantages are real and structural: binary Protobuf instead of JSON, one
+> multiplexed HTTP/2 connection instead of one per call, headers not re-sent
+> every time.
 >
-> **But** — for most internal services, the network and your database dominate.
-> Encoding is rarely your bottleneck. And I haven't benchmarked this repo, so
-> I'm not going to put a speed-up number on a slide and have you quote me."
+> **But** — for most internal services the network and your database dominate.
+> And I haven't benchmarked this repo, so I'm not putting a speed-up number on a
+> slide and having you quote me."
 
-Land it:
-
-> "Performance is a genuine benefit. It's just not usually *why* teams switch —
-> and it's not what I can prove to you today."
+> "Performance is a genuine benefit. It's just not usually *why* teams switch."
 
 ---
 
-## Slide 13 · What I *can* prove: streaming is not the point
+## Slide 16 · [ASK] So people say gRPC is for streaming
 
-**2:00 · 18:15**
+**0:45 · 18:55 · NEVER CUT**
 
-Own the method — your strongest slide for an expert audience.
+**The best participation beat in the talk. Do not rush it, and do not answer
+your own question.**
 
-> "People say gRPC is for streaming. I wanted to know if that's true, so I
-> counted. These are the real proto files from 14 projects you've heard of. 611
-> RPCs. 50 of them stream — about eight percent.
+> "People will tell you gRPC is for streaming. I wanted to know if that's true,
+> so I counted every RPC in the real proto files of 14 projects you've heard of.
+> Temporal, etcd, containerd, Kubernetes CRI, Milvus, Qdrant, TiKV, Dapr,
+> CockroachDB, Vitess, Thanos, Bazel, Envoy, OpenTelemetry.
+>
+> Six hundred and eleven RPCs. **What percentage use streaming?**"
+
+Take three or four shouted guesses. People usually say 30–60%. **Let the wrong
+answers happen** — that is the whole point.
+
+---
+
+## Slide 17 · About 8%
+
+**1:45 · 20:40 · NEVER CUT**
+
+> "Eight percent. Fifty out of six hundred and eleven.
 >
 > Temporal: 121 RPCs, **zero** streaming. Qdrant: 30, zero. containerd: 17,
 > zero."
 
-Then invite the check:
+Then invite the check — strongest thing you can say:
 
 > "The protos are in the repo under `docs/evidence`. The counts reproduce with
-> one `grep`. Please go check me — I'd rather you did."
+> one `grep`. **Please go check me.** I'd rather you did."
 
 Second conclusion:
 
@@ -308,313 +349,323 @@ Second conclusion:
 
 ---
 
-## Slide 14 · When gRPC, and when REST
+## Slide 18 · A browser cannot speak gRPC
 
-**1:00 · 19:15 · 🔶 second to cut**
+**1:30 · 22:10**
 
-> "Not a competition. A question of *where*. Inside your network, gRPC. Facing a
-> browser or a third party, REST. You'll usually need both."
+Be precise; this is a factual claim people will test.
 
-🔶 If cutting, say that one sentence over slide 15 instead.
-
----
-
-## Slide 15 · A browser cannot speak gRPC
-
-**1:30 · 20:45**
-
-Be precise, because this is a factual claim people will test.
-
-> "This isn't a configuration problem. A browser can't open a raw HTTP/2
-> connection and control trailers the way gRPC needs. That's just true.
+> "Not a configuration problem. A browser can't open a raw HTTP/2 connection and
+> control trailers the way gRPC needs.
 >
-> So something has to translate. There are three real options, and I want to
-> show you all three — because most talks show one and call it the answer."
+> So something has to translate. Three real options — and I want to show you all
+> three, because most talks show one and call it the answer."
 
 Read the Connect quote off the slide. It sets up the next slide.
 
 ---
 
-## Slide 16 · So do we actually need `gatewayd`?
+## Slide 19 · So do we actually need `gatewayd`?
 
-**2:00 · 22:45 · 🔶 cut at 30 min**
+**2:00 · 24:10 · 🔶 cut at 30 min**
 
-**Answer the question in the first four words.** This is a design review, not a
-sales pitch.
+**The slide answers in one word. Say it, then justify.**
 
-> "Do we need it? **No.** It's a choice, and here's the honest trade-off.
+> "**No.** It's a choice.
 >
 > I picked the gateway-process option because it makes the lesson *visible* —
-> `gatewayd` is a separate ECS service with its own task definition, so you
-> watch a stateless service deploy next to stateful ones. That's useful for a
-> talk about ECS.
+> `gatewayd` is a separate ECS service with its own task definition, so you watch
+> a stateless service deploy next to stateful ones. Useful for a talk about ECS.
 >
 > But if I were starting a product today? Option three is very attractive. One
-> port, no extra hop, nothing extra to operate, and the browser talks to your
-> service directly. The TypeScript client in this repo already uses Connect."
+> port, no extra hop, nothing extra to operate. The TypeScript client in this
+> repo already uses Connect."
 
-Then when it *does* earn its place, so you're not dismissing your own
-architecture:
+Then when it *does* earn its keep, so you're not dismissing your own design:
 
-> "A gateway process still earns its keep when you want one public door to audit
-> and rate-limit, or when another team owns the services and they must stay
-> plain gRPC."
+> "A gateway still earns its place when you want one public door to audit and
+> rate-limit, or another team owns the services and they must stay plain gRPC."
 
-> **Expect the follow-up:** *"so why not rewrite it with Connect?"* Honest
-> answer: the services use standard `grpc-go`, which is what most teams have,
-> and the ECS lessons are identical either way. Switching the server library
-> would change nothing in parts 4–7.
+> **Follow-up to expect:** *"so why not rewrite it with Connect?"* — the services
+> use standard `grpc-go`, which is what most teams have, and every ECS lesson is
+> identical either way.
 
 ---
 
-## Slide 17 · Not every RPC needs REST
+## Slide 20 · And do we need REST for every API?
 
-**1:30 · 24:15**
+**1:30 · 25:40**
 
-The second question, answered directly.
+> "**Also no.** Nine of our ten RPCs have a REST route. One doesn't, on purpose.
+>
+> `CheckAvailability` is how `orderd` prices a cart. Nothing outside should call
+> it. So it has no HTTP annotation — works over gRPC, 404 over REST. **The proto
+> is the access-control decision**, and you can read it in a code review."
 
-> "Do we need REST for all the APIs? **No.** Nine of our ten RPCs have a REST
-> route. One doesn't, on purpose."
+The nuance is worth the extra twenty seconds:
 
-> "`CheckAvailability` is how `orderd` prices a cart. Nothing outside should be
-> able to call it. So it has no HTTP annotation — it works over gRPC, and it's a
-> 404 over REST."
+> "And `VerifyToken` is *both* — it's `GET /v1/users/me` for the browser, and the
+> internal hop `orderd` makes on every order. Same RPC, two callers. The
+> annotation decides who can *reach* it, not who it's *for*."
 
-Give them the rule to take home:
+Give them the rule:
 
-> "The rule: **a REST route exists for a client you don't control.** Expose
-> exactly those. Four lines of annotation are the entire difference between an
-> internal and a public API."
+> "A REST route exists for a client you **don't control**. Expose exactly those."
 
 ---
 
-## Slide 18 · Four options, one ruled out
+## Slide 21 · Four options, one ruled out
 
-**2:00 · 26:15**
+**2:00 · 27:40**
 
-Give all four a fair hearing — somebody here runs EKS happily and is right to.
+Give all four a fair hearing — somebody here runs EKS happily.
 
 > "Lambda first, and let me be precise, because this isn't me preferring
 > containers. gRPC needs a process that **stays listening**, holding an HTTP/2
 > connection. Lambda has none."
 
-**Read the quote off the slide, verbatim.** It's a hard stop, not an opinion.
-
-> "EC2 works — but now you're building a deployment platform. EKS: Kubernetes is
-> genuinely excellent at this, and the cost is honest — control plane, nodes,
-> upgrades, CNI, ingress, RBAC."
+**Read the quote off the slide, word for word.** It's a hard stop, not an
+opinion.
 
 ---
 
-## Slide 19 · Why ECS for now
+## Slide 22 · Why ECS for now
 
-**1:30 · 27:45**
-
-The reframe that makes this land:
+**1:30 · 29:10**
 
 > "The question isn't serverless versus containers. It's: how much orchestration
-> do four services actually need? Both ECS and EKS run this correctly. One of
-> them asks you to operate Kubernetes first."
+> do four services actually need? Both ECS and EKS run this correctly. One asks
+> you to operate Kubernetes first."
 
 Then remove the fear of a wrong decision:
 
-> "And moving later is **not a rewrite**. The container, the contract, the health
-> check, the graceful shutdown — all of it comes with you. Only the YAML
-> changes.
+> "Moving later is **not a rewrite**. The container, the contract, the health
+> check, the graceful shutdown — all of it comes with you. Only the YAML changes.
 >
 > 'For now' is a legitimate engineering answer. 'Forever' rarely is."
 
 ---
 
-## Slide 20 · What Fargate actually gives you
+## Slide 23 · [ASK] A question about Fargate
 
-**2:00 · 29:45 · 🔶 cut at 30 min**
+**0:30 · 29:40**
 
-**Do not just say "serverless containers".** This is where an experienced person
-decides whether you actually know Fargate.
+> "Your container is running on Fargate. There's a kernel underneath it. **Who
+> patches that kernel?**"
 
-> "Fargate means you don't manage EC2 instances. AWS's words: you no longer have
-> to provision, configure or scale clusters of virtual machines.
->
-> What AWS owns is the **platform version** — and AWS defines that as a
-> combination of the kernel and the container runtime versions."
+Most rooms say "AWS" quickly. Then the one they haven't thought about:
 
-Then the part people miss — **read it off the slide:**
+> "Right. And **what happens to your running task when they do?**"
+
+Let the silence sit. Then advance.
+
+---
+
+## Slide 24 · What Fargate actually gives you
+
+**2:00 · 31:40 · 🔶 cut at 30 min**
+
+**This is where an experienced person decides whether you actually know
+Fargate.** Don't just say "serverless containers".
+
+> "AWS owns the **platform version** — and AWS defines that as a combination of
+> the kernel and the container runtime versions. So yes, AWS patches it."
+
+Then read the quote off the slide:
 
 > "If a security issue is found, AWS creates a patched revision **and retires
-> tasks running on the vulnerable revision.**
->
-> So AWS will stop your task to patch underneath you. A task never upgrades in
-> place; a new task gets the new revision."
+> tasks running on the vulnerable revision.** A task never upgrades in place — a
+> *new* task gets the new revision."
 
 And the correction that matters:
 
 > "But you still own everything *inside* your image. Your base image, your
-> packages, your CVEs. **Serverless does not mean nobody patches** — it means AWS
-> patches their half and you still patch yours."
+> packages, your CVEs. **Serverless does not mean nobody patches** — AWS patches
+> their half, kills your task to do it, and you still patch yours."
 
-Then connect it forward:
+Then plant the callback:
 
-> "Which is why graceful shutdown isn't optional here. Your task **will** be
-> replaced, on somebody else's schedule."
-
----
-
-## Slide 21 · Three words
-
-**0:45 · 30:30**
-
-Don't skip, even for an advanced room. 45 seconds, and it stops people silently
-falling behind.
-
-> "Task: one container with its own IP — one copy of your service. Task
-> definition: the recipe, and it's versioned — editing it makes revision 2.
-> Service: the thing that keeps N tasks alive and replaces the dead ones."
+> "Which is why graceful shutdown isn't optional. Remember that — it comes back."
 
 ---
 
-## Slide 22 · Three services, one contract
+## Slide 25 · Three words
 
-**1:30 · 32:00 · NEVER CUT**
+**0:45 · 32:25 · 🔶 third to cut**
 
-GitHub tab again. Trace it.
+Don't skip for a mixed room. 45 seconds, and it stops people silently falling
+behind.
 
-> "Browser comes in over REST to `gatewayd`. `gatewayd` speaks gRPC to all three.
-> And the thick arrows are the interesting ones — `orderd` calling `userd` and
-> `productsd` on every single order.
+> "Task: one container with its own IP. Task definition: the recipe, and it's
+> versioned — editing it makes revision 2. Service: keeps N tasks alive and
+> replaces the dead ones."
+
+---
+
+## Slide 26 · Three services, one contract
+
+**1:30 · 33:55**
+
+GitHub tab. Trace it.
+
+> "Browser in over REST to `gatewayd`. `gatewayd` speaks gRPC to all three. The
+> thick arrows are the interesting ones — `orderd` calling the other two on every
+> order."
+
+The line to land:
+
+> "**Nobody in this diagram knows anybody's IP address.** They dial names. That's
+> slide 35."
+
+---
+
+## Slide 27 · The request has no price in it
+
+**1:15 · 35:10 · NEVER CUT**
+
+> "The client sends *what* and *how many*. `orderd` asks `productsd` what it
+> costs."
+
+Make it concrete and slightly alarming — the sale framing does the work:
+
+> "Think about the alternative during a sale. If the client sends the price, then
+> a client can ask 'is this ₹2,000 sale price real?' — and then submit ₹200."
+
+---
+
+## Slide 28 · [ASK] You tap "Buy". The spinner spins.
+
+**0:45 · 35:55**
+
+A scenario everyone has lived. **Ask it and wait.**
+
+> "Midnight, sale traffic, patchy 4G. Your phone sends the order and the response
+> never comes back. So your phone retries — reasonably, it has no idea whether
+> the server got it.
 >
-> Nobody in here knows anybody's IP address. They dial a name, `ecom.local`, and
-> Cloud Map resolves it. That's slide 29."
+> **Did you just buy one phone, or two?**"
 
-> "And one proto set generated the Go servers, the Go clients, `gatewayd`, the
-> OpenAPI spec and the TypeScript client."
+Hands or shouts. Someone will say "two", someone "depends". Both are useful.
 
 ---
 
-## Slide 23 · One order, end to end
+## Slide 29 · That is what an idempotency key is for
 
-**1:00 · 33:00 · 🔶 third to cut**
+**1:45 · 37:40**
 
-Walk the arrows top to bottom. The line to emphasise:
+> "The client makes up a unique string per *intent to buy* and sends it with the
+> order. And the server's deal is: send me the same key twice, you get the same
+> order back. I will not create a second one."
 
-> "Total computed from **catalogue** prices. Not from anything the client sent."
+Then the three details, because this is where people implement it wrong:
 
-🔶 If cutting, say that one sentence on slide 24 instead.
+> "**Required** — no key, `InvalidArgument`. A retry-unsafe order API is a bug,
+> not a missing feature.
+>
+> **Namespaced per user**, so two shoppers can't collide on `cart-1`.
+>
+> And **a unique index backs it**, not just an `if`. Because two retries race —
+> one loses, catches the duplicate-key error, and returns the stored order."
+
+Land it:
+
+> "The check alone isn't enough. **The database constraint is what makes it
+> true.**"
 
 ---
 
-## Slide 24 · Two contract decisions
+## Slide 30 · And "out of stock" is not an error
 
-**1:30 · 34:30**
+**1:15 · 38:55**
 
-> "The order request carries **no price**. The client sends what, and how many."
-
-Make it concrete and slightly alarming:
-
-> "Think about what the alternative means during a sale. If the client sends the
-> price, then a client can ask 'is this ₹2,000 sale price real?' — and then
-> submit ₹200."
-
-Then the second:
-
-> "And out of stock isn't an error. It's an answer. So it comes back as OK, with
-> a status and a reason enum — not a 500. Status codes stay for unauthenticated,
-> invalid argument, unavailable."
+> "Out of stock isn't a transport failure. It's an answer. So it comes back as
+> OK, with a status and a reason enum — not a 500."
 
 The line that makes it stick:
 
-> "If your client does `strings.Contains(err.Error(), \"stock\")`, then somebody
-> rephrasing a message breaks production. An enum can't be rephrased."
+> "If your client does `strings.Contains(err.Error(), "stock")`, then somebody
+> rephrasing a message breaks production. **An enum can't be rephrased.**"
 
 ---
 
-## Slide 25 · One honest note on copies
+## Slide 31 · One honest note on copies
 
-**1:15 · 35:45 · 🔶 cut at 30 min**
+**1:15 · 40:10 · 🔶 fourth to cut**
 
-**This corrects a thing I used to say wrong, so say it carefully.**
+**This corrects something I used to say wrong. Say it as a correction** — it
+reads as honesty, not as hedging.
 
 > "`userd` and `productsd` run three copies because their database is baked into
-> the image — every copy is identical, so any copy can answer any read.
+> the image. Every copy identical, so any copy answers any read.
 >
-> `orderd` runs one. And I want to be precise about why, because I used to say
-> this badly: **not** 'because it writes'. Writers scale fine. It's because it
-> writes **to a file inside the task**. Three copies would be three different
-> databases.
+> `orderd` runs one — and I want to be precise, because I used to say this
+> badly. **Not** 'because it writes'. Writers scale fine. It's because it writes
+> **to a file inside the task**. Three copies would be three different databases.
 >
-> Give it RDS and `orderd` scales like the others."
-
-Then own the shortcut:
-
-> "SQLite on the task is a demo shortcut. It keeps my AWS deploy at about two
-> minutes instead of ten, which on a conference stage is the biggest risk
-> reduction available. Terraform refuses to scale it, so the shortcut can't bite
-> me by accident."
+> Give it a managed database and `orderd` scales like the others."
 
 ```sh
 make show-guard
 ```
 
+> "Terraform refuses to scale it, so the shortcut can't bite me by accident."
+
 ---
 
-## Slide 26 · Six modules, four services, two environments
+## Slide 32 · Six modules, four services, two environments
 
-**1:30 · 37:15**
+**1:30 · 41:40**
 
 **Part 6 starts. Tell them it's the important bit.**
 
-> "This is the part I'd most like you to take away, so let me orient you first.
-> Six modules. The `stack` directory is the whole deployment, and it's shared
-> verbatim. And two environment directories that differ in exactly one file."
+> "This is the part I'd most like you to take away. Six modules. The
+> `deployment` directory is the whole thing, and both environments load it
+> unchanged. And two environment directories that differ in exactly one file."
 
-> "`ecs-service` is instantiated four times — one per service. A single
-> `protocol` variable switches the port mapping and which health-check mode the
-> baked-in probe uses, so the gRPC services and the HTTP gateway come out of the
-> same module."
+> "`ecs-service` is instantiated four times. One `protocol` variable switches the
+> port mapping and the health-check mode — so three gRPC services and an HTTP
+> gateway come out of the same module."
 
 ---
 
-## Slide 27 · Every AWS component this creates
+## Slide 33 · Every AWS component this creates
 
-**2:30 · 39:45 · NEVER CUT**
+**2:30 · 44:10 · NEVER CUT**
 
-Do **not** read all sixteen rows. Pick five and let them read the rest.
+**Do not read sixteen rows.** Pick five, let them read the rest.
 
-> "Twenty-two resource types. I won't read them all — but let me pull out the
-> ones that bite people."
+> "Twenty-two resource types. Let me pull out the ones that bite people."
 
 1. **VPC** — *"`enable_dns_hostnames` is required for Cloud Map. Miss it and
-   service discovery silently resolves nothing."*
+   discovery silently resolves nothing."*
 2. **Security group** — *"one self-referencing rule. That's how `orderd` reaches
    the other two. No CIDR lists to maintain as tasks come and go."*
-3. **Cloud Map namespace** — *"this creates a Route 53 private hosted zone. Cloud
-   Map is the registry; Route 53 is the DNS underneath it."*
+3. **Cloud Map namespace** — *"creates a Route 53 private hosted zone. Cloud Map
+   is the registry; Route 53 is the DNS underneath."*
 4. **The two IAM roles** — *"next slide, because people conflate them."*
-5. **What's missing** — *"no NAT Gateway, no ALB, no RDS. Each one deliberate."*
+5. **What's missing** — *"no NAT Gateway, no ALB, no RDS. Each deliberate."*
 
-> **If asked about NAT:** a NAT Gateway is the most common way a demo account
-> quietly bills you. Public subnets with `assign_public_ip` instead. **For
-> production you'd do the opposite** — private subnets plus VPC endpoints for
-> ECR, S3, logs and Secrets Manager. Say that, so nobody copies public subnets
-> into prod.
+> **If asked about NAT:** the most common way a demo account quietly bills you.
+> Public subnets with `assign_public_ip` instead. **In production you'd do the
+> opposite** — private subnets plus VPC endpoints for ECR, S3, logs and Secrets
+> Manager. Say that, so nobody copies public subnets into prod.
 
 ---
 
-## Slide 28 · The two IAM roles
+## Slide 34 · The two IAM roles
 
-**1:30 · 41:15 · 🔶 cut at 30 min**
+**1:30 · 45:40 · 🔶 cut at 30 min**
 
-> "Execution role: the **ECS agent** uses it, **before your code runs** — pull
-> the image, resolve the secret, create log streams. Task role: **your
-> process's** credentials, at runtime.
+> "Execution role: the **ECS agent** uses it, **before your code runs** — pull the
+> image, resolve the secret, create log streams. Task role: **your process's**
+> credentials, at runtime.
 >
 > Get these backwards and your task fails to start with an error pointing at the
 > wrong role. It's a genuinely confusing hour."
 
 Then the good bit:
 
-> "Our task role is **empty**. On purpose. These services call no AWS API at
-> runtime, so nothing is granted 'just in case'."
+> "Ours is **empty**. On purpose. These services call no AWS API at runtime."
 
 Run it live if the terminal is up:
 
@@ -623,94 +674,104 @@ docker inspect $(docker ps --filter "name=ministack-ecs-.*-userd$" -q) \
   --format '{{range .Config.Env}}{{println .}}{{end}}' | grep AWS_CONTAINER
 ```
 
-> "That variable is the whole 'no API keys on ECS' story. The SDK reads it and
-> gets temporary credentials. **You never created a key, so there's none to
-> leak.**"
+> "**You never created a key, so there's none to leak.**"
 
 ---
 
-## Slide 29 · Cloud Map is just DNS
+## Slide 35 · Cloud Map is just DNS
 
-**2:00 · 43:15**
+**1:30 · 47:10**
 
 > "`orderd` knows no IP addresses. It dials a name. ECS registers each task's IP
-> with Cloud Map, Cloud Map maintains the A records in a Route 53 private zone,
-> and tasks come and go while the name stays put."
+> with Cloud Map, Cloud Map keeps the A records in a Route 53 private zone, and
+> tasks come and go while the name stays put."
 
-Point at the three settings, then tell the story — **the best war story in the
-talk:**
-
-> "That last block, `health_check_custom_config`. It looks like dead weight. I
-> had a deprecation warning on that field, so I tidied it up — emptied the block.
->
-> Which makes the provider send **no** health config at all. Cloud Map then never
-> accepts ECS's health reports, every instance stays UNHEALTHY, and unhealthy
-> instances are excluded from DNS answers. My client failed with `code 14: no
-> children to pick from`.
->
-> Meanwhile: four tasks running, four Cloud Map services, VPC DNS enabled.
-> Everything looked healthy. The comment in that file now says, in capitals, do
-> not clean this up."
+Point at the three settings, then advance — the next slide is the story.
 
 ---
 
-## Slide 30 · One pipeline. Laptop and production.
+## Slide 36 · A story about that last block
 
-**2:00 · 45:15 · NEVER CUT — this is the thesis**
+**2:00 · 49:10 · 🔶 cut at 30 min**
 
-Run the diff live. It is more convincing than the slide.
+**Tell it as a mystery: symptoms first, cause last.** It is the best war story
+in the deck and the structure is what makes it land.
+
+> "I had a deprecation warning on `failure_threshold`. So I tidied it up — left
+> the block empty. Deployed. And my client started failing with `code 14: no
+> children to pick from`.
+>
+> So I checked. Four tasks running. Four Cloud Map services, all present. VPC DNS
+> hostnames enabled. Security groups fine. Everything green."
+
+Pause, then the cause:
+
+> "An *empty* block makes the provider send **no health config at all**. Cloud Map
+> then never accepts ECS's health reports, every instance stays UNHEALTHY — and
+> unhealthy instances are excluded from DNS answers.
+>
+> Four healthy tasks. Zero addresses returned. The comment in that file now says,
+> in capitals, do not clean this up."
+
+---
+
+## Slide 37 · [BEAT] One command. It is the whole talk.
+
+**0:10 · 49:20**
+
+Say it, then switch to the terminal. Do not explain it on this slide.
+
+---
+
+## Slide 38 · One pipeline. Laptop and production.
+
+**2:00 · 51:20 · NEVER CUT — this is the thesis**
+
+Run the diff **live**. It is more convincing than the slide.
 
 ```sh
 diff terraform/envs/local/provider.tf terraform/envs/aws/provider.tf
 ```
 
 > "That diff is the talk. Local has fake credentials, a few skip flags, and an
-> endpoints block that sends every AWS API call to a local emulator. AWS has a
+> endpoints block sending every AWS API call to a local emulator. AWS has a
 > region. That's it.
 >
-> Everything that *describes the deployment* — the VPC, the task definitions, the
-> services, the IAM, Cloud Map — lives in `stack/` and is shared **verbatim**.
-> Not a copy. Not a simplified local version. The same files."
+> Everything describing the deployment — VPC, task definitions, services, IAM,
+> Cloud Map — lives in `deployment/`, and both environments load the same files.
+> Not a copy. Not a simplified local version."
 
 Land the reason it matters:
 
-> "Which is the real argument for emulating locally instead of keeping a second
-> set of 'local' manifests: **there is no second set to drift.** When I change a
-> task definition, I change it once."
+> "Which is the real argument for emulating locally rather than keeping a second
+> set of 'local' manifests: **there is no second set to drift.** Change a task
+> definition and you change it once."
 
 ---
 
-## Slide 31 · How the laptop part works
+## Slide 39 · Where the laptop version is honest
 
-**1:30 · 46:45 · 🔶 fourth to cut**
+**1:30 · 52:50 · 🔶 fifth to cut**
 
-**Volunteer the gaps before anyone finds them.** This is where you earn the
-right to have shown a local demo at all.
+**Volunteer the gaps before anyone finds them.** This earns you the right to
+have shown a local demo at all.
 
 > "Ministack emulates ECS by launching real Docker containers. LocalStack's free
-> Community edition ended in March 2026, and ECS was never in it anyway.
+> Community edition ended March 2026, and ECS was never in it anyway.
 >
-> What's real locally: the Terraform, the task definitions, `awsvpc` networking,
-> secret injection, health checks, graceful shutdown, metrics, traces.
->
-> Three places I substitute. Cloud Map stores the registrations but serves no
-> DNS, so `make dns` adds Docker network aliases — and that substitution is
-> legitimate, because **service discovery is only DNS underneath.** `awsvpc`
-> tasks have no host port, so I run a relay; on AWS that's SSM port forwarding.
-> And the emulator doesn't echo back `healthStatus` or `launchType`."
-
-> "Naming the limits yourself is more credible than being caught by them. It's
-> also exactly why this deploys to real AWS too."
+> Three places I substitute. Cloud Map stores registrations but serves no DNS, so
+> `make dns` adds Docker network aliases — legitimate, because **service discovery
+> is only DNS underneath.** `awsvpc` tasks have no host port, so I run a relay; on
+> AWS that's SSM port forwarding. And the emulator doesn't echo back
+> `healthStatus` or `launchType`."
 
 🔶 If cutting, say the last sentence during Demo 1.
 
 ---
 
-## Slide 32 · 🔴 DEMO 1 — is this really ECS?
+## Slide 40 · 🔴 DEMO 1 — is this really ECS?
 
-**3:00 · 49:45 · NEVER CUT**
-
-Answers the question the skeptic in row three is already forming.
+**3:00 · 55:50 · NEVER CUT**
 
 ```sh
 make ps
@@ -719,51 +780,35 @@ make ps
 Let it scroll, then scroll **back up** to step 4 and point.
 
 > "This variable — `ECS_CONTAINER_METADATA_URI_V4`. Nothing in my code sets it.
-> The platform injected it. The task can describe itself: cluster, task ARN,
-> family and revision, availability zone."
+> The platform injected it. The task describes itself: cluster, task ARN, family
+> and revision, availability zone."
 
-(The revision number is whatever your applies have reached — mine was `rev 3`.
-The point is that a revision *exists*, not its value.)
+(Revision number is whatever your applies reached — mine was `rev 3`. The point
+is that a revision *exists*.)
 
 Then step 5, the real prize:
 
-> "And this one. `AWS_CONTAINER_CREDENTIALS_FULL_URI`. The AWS SDK reads it on
-> its own and gets temporary credentials. **There is no access key anywhere** —
-> not in the image, not in git, not in a `.env` file."
-
-Then volunteer the emulator's limits (or, if you cut slide 31, here):
-
-> "Two honest gaps: `healthStatus` says UNKNOWN and `launchType` comes back
-> empty, even though the task definition asks for FARGATE. The emulator doesn't
-> echo those back. Real ECS reports both."
+> "And this one. `AWS_CONTAINER_CREDENTIALS_FULL_URI`. The SDK reads it and gets
+> temporary credentials. **There is no access key anywhere** — not in the image,
+> not in git, not in a `.env` file."
 
 ---
 
-## Slide 33 · 🔴 DEMO 2 — the code, running
+## Slide 41 · 🔴 DEMO 2 — the code, running
 
-**3:00 · 52:45**
+**3:00 · 58:50**
 
 ```sh
 make demo
 ```
 
-Narrate while it runs. Do not read the output silently.
+Narrate while it runs. Do not read output silently.
 
-> "Search, no auth — the read path that scales. Log in as a **seeded** user.
-> Order placed: two network hops, and notice the client sent no prices. Same
-> idempotency key again: same order, not a second one. Then out of stock. Then
-> no token."
+> "Search, no auth. Log in as a **seeded** user. Order placed: two network hops,
+> and the client sent no prices. Same idempotency key again — same order, not a
+> second one. Then out of stock. Then no token."
 
-🔶 **40-min path: stop here.** Otherwise:
-
-```sh
-make dev-rest
-```
-
-> "Identical flow over plain HTTP and JSON. Same services, same contract,
-> generated gateway."
-
-Then the slide-17 payoff — **always keep this:**
+🔶 **40-min path: stop here.** Otherwise `make dev-rest`, then always keep this:
 
 ```sh
 curl -s -o /dev/null -w 'REST -> %{http_code}\n' \
@@ -772,102 +817,159 @@ curl -s -o /dev/null -w 'REST -> %{http_code}\n' \
 
 > "404. Four missing lines of annotation."
 
-If time allows, `make ts-demo`:
-
-> "Same proto. I added one plugin. I wrote no types."
-
 ---
 
-## Slide 34 · 🔴 DEMO 3 — the same Terraform, on real AWS
+## Slide 42 · 🔴 DEMO 3 — the same Terraform, on real AWS
 
-**2:30 · 55:15 · 🔶 cut at 30 min (describe it instead)**
+**2:30 · 61:20 · 🔶 cut at 30 min (describe it)**
 
-**Pre-deployed the day before.** Do a read-only demo.
+**Pre-deployed the day before.** Read-only.
 
 ```sh
 make ps-aws
-```
-
-> "Same modules. One provider block different. And now `healthStatus` says
-> HEALTHY, `launchType` says FARGATE, and the tasks are spread across two
-> availability zones."
-
-Show Cloud Map doing real DNS:
-
-```sh
 aws servicediscovery list-services --query 'Services[].Name'
 ```
 
-> "No alias shim here. Cloud Map is doing the DNS for real."
-
-Then say the number:
-
-> "That apply takes about two minutes. It's two minutes because there's no RDS
-> and no NAT Gateway in it."
-
-**And the discipline line:**
+> "Same modules. One provider block different. Now `healthStatus` says HEALTHY,
+> `launchType` says FARGATE, tasks across two availability zones. And no alias
+> shim — Cloud Map is doing the DNS for real."
 
 > "And `terraform destroy` before I leave the venue. Which I will actually run."
 
 ---
 
-## Slide 35 · One thing to know before you ship gRPC on ECS
+## Slide 43 · Now, the promise from slide 2
 
-**2:00 · 57:15 · NEVER CUT**
+**1:00 · 62:20 · NEVER CUT**
 
-**Not a demo — knowledge.** This is the slide people will thank you for.
+**Close the loop you opened. Say so explicitly** — the callback is the payoff.
 
-> "`pick_first` is gRPC's default load-balancing policy. It resolves the name,
-> connects to **one** address, and sends everything down that one connection.
+> "Right. Remember the promise from the second slide?"
+
+Walk the checklist, ticking each one:
+
+> "`userd` scaled to three tasks. Three of three running. Three of three healthy
+> in Cloud Map. DNS returns three A records. Everything correct.
 >
-> So you scale to three tasks, all three healthy, DNS returning all three
-> addresses — and one task takes a hundred percent of the traffic. I measured
-> it: 120 of 120 requests on one task.
+> And I'm going to send 120 requests through `orderd`, each one making a call to
+> `userd`."
+
+---
+
+## Slide 44 · [ASK] Where does the traffic go?
+
+**0:45 · 63:05 · NEVER CUT**
+
+**Do not answer. Make them commit to a number out loud.**
+
+> "120 requests. Three healthy tasks. **How many land on each one?**"
+
+Most rooms say "forty, forty, forty". Take a couple of answers, then advance.
+
+---
+
+## Slide 45 · 120 / 0 / 0
+
+**1:30 · 64:35 · NEVER CUT**
+
+Let the number sit before you explain anything.
+
+> "A hundred and twenty. Zero. Zero.
 >
-> And nothing warns you. No error, no log line, no failed health check."
+> No error. No log line. No failed health check. Every dashboard green."
 
-Pause, then:
+Pause. Then:
 
-> "Everybody's first conclusion is that service discovery is broken. It isn't.
-> Discovery handed back three addresses. **The client never asked to balance.**"
+> "And everybody's first conclusion is that service discovery is broken. It
+> isn't. Discovery did its job perfectly — it handed back three addresses."
 
-Then the fix, and spend your time on the prefix:
+Slowly:
+
+> "**The client never asked to balance.**"
+
+---
+
+## Slide 46 · Why: `pick_first`
+
+**1:30 · 66:05**
+
+Explain it without making the gRPC authors sound foolish — this matters for
+credibility.
+
+> "`pick_first` is the default. Resolve the name, connect to one address, send
+> everything down that connection.
+>
+> And that's a *reasonable* default! With HTTP/2 one connection multiplexes many
+> requests, so opening more looks wasteful. It's optimised for the other end
+> being a single load balancer.
+>
+> On ECS the other end is three tasks with three IPs. **The default isn't a bug —
+> it's a correct answer to a different question.**"
+
+---
+
+## Slide 47 · The fix is two halves
+
+**2:00 · 68:05 · NEVER CUT**
+
+Spend your time on the prefix. This is where people half-fix it.
 
 > "Two settings, and either alone does nothing. `dns:///` is not decoration —
 > with a bare host:port, gRPC uses the *passthrough* resolver, which gives you
 > exactly one address. So you can set `round_robin`, feel good about it, and it
-> still has nothing to balance over. That's the version that looks fixed and
-> isn't.
->
-> Plus `MaxConnectionAge` on the server, so clients re-resolve after a
-> scale-out. With both: forty, forty, forty."
+> still has nothing to balance over. **That's the version that looks fixed and
+> isn't.**"
 
-> **If someone asks to see it:** `-var lb_policy=pick_first` redeploys `orderd`
-> with the bug, then `make scale N=3 && make demo-load`. Offer it as a hallway
-> conversation rather than burning five minutes on stage.
+Then the server half, with the callback to slide 24:
+
+> "And `MaxConnectionAge` on the server, so clients re-resolve after a scale-out.
+> Without it, a client connected *before* you scaled never learns the new tasks
+> exist. Which is exactly when you scale — during the sale.
+>
+> With both: forty, forty, forty."
+
+> **If someone asks to see it live:** `-var lb_policy=pick_first` redeploys
+> `orderd` with the bug, then `make scale N=3 && make demo-load`. Offer it as a
+> hallway conversation rather than burning five minutes.
 
 ---
 
-## Slide 36 · What to take away
+## Slide 48 · What to take away
 
-**1:00 · 58:15**
+**1:00 · 69:05**
 
-Read them. Don't elaborate — the room is full.
+Read them. Don't elaborate.
 
 If you only have time for three: **the boundary test**, **one Terraform stack
 with two provider blocks**, and **`pick_first`**.
 
 ---
 
-## Slide 37 · Clone it
+## Slide 49 · Green dashboards are not working
 
-**0:45 · 59:00**
+**0:45 · 69:50 · NEVER CUT**
 
-> "It's all open. `make test` needs no Docker and no AWS. `make local-up` gives
-> you real ECS tasks on your laptop.
+**The closing line. Deliver it and stop talking.**
+
+> "Two stories in this talk. Four tasks running, four Cloud Map services, DNS
+> enabled — and zero addresses returned. Three healthy tasks, correct DNS — and
+> one of them doing everything.
 >
-> And `SPEC.md` marks every claim as verified or assumed — including the ones I
-> got wrong first."
+> Both looked perfectly fine."
+
+Pause.
+
+> "**Green dashboards are not the same thing as working.** Deploy it once before
+> you trust it."
+
+---
+
+## Slide 50 · Clone it
+
+**0:45 · 70:35**
+
+> "All open. `make test` needs no Docker and no AWS. And `SPEC.md` marks every
+> claim as verified or assumed — including the ones I got wrong first."
 
 **Thank you.** Then questions.
 

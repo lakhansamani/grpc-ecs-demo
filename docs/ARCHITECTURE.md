@@ -528,7 +528,7 @@ diff terraform/envs/local/provider.tf terraform/envs/aws/provider.tf
 ```
 
 Everything describing the deployment lives in
-[`terraform/stack/`](../terraform/stack) and is shared **verbatim**. The only
+[`terraform/deployment/`](../terraform/deployment) and is **the same files** in both. The only
 difference between running on your laptop and running on AWS is the provider
 block: fake credentials, a few `skip_*` flags and an `endpoints` block locally;
 on AWS, a region and nothing else.
