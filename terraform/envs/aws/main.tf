@@ -12,6 +12,13 @@ variable "operator_ingress_cidrs" {
   default     = []
   description = "Your public IP as a /32 so the demo client can reach paymentd. Keep this tight."
 }
+# Region lives here so you can switch without editing the stack. Fargate ARM64
+# is available in all commercial regions, so any of them works.
+variable "aws_region" {
+  type    = string
+  default = "ap-south-1"
+}
+
 variable "user_desired_count" {
   type    = number
   default = 1
@@ -51,8 +58,8 @@ module "stack" {
   source = "../../stack"
 
   environment        = "aws"
-  aws_region         = "ap-south-1" # Mumbai: closest region to Vadodara
-  availability_zones = ["ap-south-1a", "ap-south-1b"]
+  aws_region         = var.aws_region
+  availability_zones = ["${var.aws_region}a", "${var.aws_region}b"]
 
   user_image    = var.user_image
   product_image = var.product_image
