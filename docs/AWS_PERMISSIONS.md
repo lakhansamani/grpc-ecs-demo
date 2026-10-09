@@ -181,7 +181,7 @@ Ordered by how much it hurts.
 | `iam:CreateRole` | Reuse an existing role (most accounts already have `ecsTaskExecutionRole`). I can add an `execution_role_arn` variable in ~10 minutes. **Still needs `iam:PassRole`.** | None — the role is plumbing, not content |
 | `logs:CreateLogGroup` | Drop the Terraform log group and set `awslogs-create-group=true` in the task definition so ECS creates it | None |
 | Secrets Manager | Pass `JWT_SECRET` as a plain `environment` value instead of `secrets` | **Loses the Secrets Manager segment**, which is the concrete "no keys in the image" story |
-| Cloud Map + Route 53 | Put both containers in **one** task definition so `paymentd` reaches `identityd` on `localhost` | **Severe.** Kills service discovery *and* the load-balancing demo — the best content in the talk |
+| Cloud Map + Route 53 | Put all four containers in **one** task definition so `orderd` reaches `userd` on `localhost` | **Severe.** Kills service discovery *and* the load-balancing demo — the best content in the talk |
 | `iam:PassRole` | none | **Blocking. Fargate cannot run.** |
 
 ## What to send your admin

@@ -4,24 +4,24 @@ Short answer to "do we need Cloud Map for Postman?" — **no.** They solve
 different problems, and conflating them is easy:
 
 ```
-  Postman on your laptop ──────────────> paymentd        EXTERNAL access
-                                            │            (public IP, SSM, or ALB)
-                                            │
-                                            ↓
-                                        identityd        INTERNAL discovery
-                                                          (Cloud Map)
+  Postman on your laptop ──────────────> gatewayd / orderd     EXTERNAL access
+                                              │                (public IP, SSM, or ALB)
+                                              ↓
+                                     userd · productsd         INTERNAL discovery
+                                                                (Cloud Map)
 ```
 
-**Cloud Map is for the inside hop**, `paymentd` → `identityd`. Postman never
-touches it. So you can demo from Postman with no `servicediscovery` or
-`route53` permission at all.
+**Cloud Map is for the inside hops**, `orderd` → `userd` and
+`orderd` → `productsd`. Postman never touches it. So you can demo from Postman
+with no `servicediscovery` or `route53` permission at all.
 
 ## Postman does speak gRPC
 
-Postman has had a gRPC client since 2022. Both services register the **server
+Postman has had a gRPC client since 2022. Every service registers the **server
 reflection** service, so Postman can introspect the methods without being given
-a `.proto` file. Point it at `host:50052`, pick `payment.v1.PaymentService`, and
-put the token in metadata as `authorization: Bearer <jwt>`.
+a `.proto` file. Point it at `host:50052`, tick "Using server reflection", pick
+`order.v1.OrderService`, and put the token in metadata as
+`authorization: Bearer <jwt>`. For REST, import `gen/openapi/api.swagger.json`.
 
 ## Three ways in, cheapest first
 
@@ -52,7 +52,7 @@ room's NAT surprises you.
 
 ```sh
 # needs enable_execute_command = true (the default in envs/aws)
-TASK=$(aws ecs list-tasks --cluster ecom-aws --service-name paymentd \
+TASK=$(aws ecs list-tasks --cluster ecom-aws --service-name gatewayd \
   --query 'taskArns[0]' --output text)
 RUNTIME=$(aws ecs describe-tasks --cluster ecom-aws --tasks "$TASK" \
   --query 'tasks[0].containers[0].runtimeId' --output text)
@@ -80,13 +80,13 @@ Not Postman access. You lose two things:
 
 | Lost | Why it matters |
 |---|---|
-| Stable internal addressing | `paymentd` would need `identityd`'s private IP passed in, which means a two-stage apply and breaks the moment a task is replaced |
-| **The load-balancing segment** | it needs 3 `identityd` tasks behind ONE name so the client resolves multiple A records. Port forwarding cannot substitute: the client that must load-balance is `paymentd`, *inside* the VPC |
+| Stable internal addressing | `orderd` would need `userd`'s and `productsd`'s private IPs passed in, which means a two-stage apply and breaks the moment a task is replaced |
+| **The load-balancing segment** | it needs 3 `userd` tasks behind ONE name so the client resolves multiple A records. Port forwarding cannot substitute: the client that must load-balance is `orderd`, *inside* the VPC |
 
 ### The fallback if Cloud Map is refused
 
-Put both containers in a **single task definition**, so `paymentd` reaches
-`identityd` on `localhost:50051`. What survives and what does not:
+Put all the containers in a **single task definition**, so `orderd` reaches
+`userd` on `localhost:50051`. What survives and what does not:
 
 - ✅ still two processes, two binaries, real gRPC over the loopback, the auth
   delegation and trust boundary intact

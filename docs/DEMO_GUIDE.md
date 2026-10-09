@@ -41,7 +41,7 @@ cd ~/projects/grpc-ecs-demo
 docker compose down -v
 docker ps -aq --filter "name=ministack-ecs-" | xargs -r docker rm -f
 docker ps -aq --filter "name=forward-"       | xargs -r docker rm -f
-docker network rm ecom-dns 2>/dev/null
+docker network rm ecom-dns ecom-infra 2>/dev/null
 rm -rf data
 ```
 
@@ -511,7 +511,7 @@ make forward-stop
 make tf-local-destroy
 docker compose down -v
 docker ps -aq --filter "name=ministack-ecs-" | xargs -r docker rm -f
-docker network rm ecom-dns 2>/dev/null
+docker network rm ecom-dns ecom-infra 2>/dev/null
 rm -rf data
 ```
 
