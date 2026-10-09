@@ -19,9 +19,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/lakhansamani/grpc-ecs-ecom/internal/platform/store"
-	"github.com/lakhansamani/grpc-ecs-ecom/internal/product"
-	"github.com/lakhansamani/grpc-ecs-ecom/internal/user"
+	"github.com/lakhansamani/grpc-ecs-demo/internal/platform/store"
+	"github.com/lakhansamani/grpc-ecs-demo/internal/product"
+	"github.com/lakhansamani/grpc-ecs-demo/internal/user"
 )
 
 // SeedUsers are fixed so the demo is reproducible and the passwords can go on

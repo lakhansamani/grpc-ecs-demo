@@ -400,7 +400,7 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x0fIdentityService\x12G\n" +
 	"\bRegister\x12\x1c.identity.v1.RegisterRequest\x1a\x1d.identity.v1.RegisterResponse\x12>\n" +
 	"\x05Login\x12\x19.identity.v1.LoginRequest\x1a\x1a.identity.v1.LoginResponse\x12P\n" +
-	"\vVerifyToken\x12\x1f.identity.v1.VerifyTokenRequest\x1a .identity.v1.VerifyTokenResponseBIZGgithub.com/lakhansamani/grpc-ecs-ecom/gen/go/identity/v1;identityv1b\x06proto3"
+	"\vVerifyToken\x12\x1f.identity.v1.VerifyTokenRequest\x1a .identity.v1.VerifyTokenResponseBIZGgithub.com/lakhansamani/grpc-ecs-demo/gen/go/identity/v1;identityv1b\x06proto3"
 
 var (
 	file_identity_v1_identity_proto_rawDescOnce sync.Once

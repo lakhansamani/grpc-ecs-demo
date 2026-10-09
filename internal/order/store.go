@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	orderv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/order/v1"
+	orderv1 "github.com/lakhansamani/grpc-ecs-demo/gen/go/order/v1"
 )
 
 // Order is a placed order, confirmed or rejected. Rejected orders are stored

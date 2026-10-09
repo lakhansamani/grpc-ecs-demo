@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	productv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/product/v1"
+	productv1 "github.com/lakhansamani/grpc-ecs-demo/gen/go/product/v1"
 )
 
 // MaxPageSize caps list and search results.

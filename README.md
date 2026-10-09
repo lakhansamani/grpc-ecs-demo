@@ -1,4 +1,4 @@
-# grpc-ecs-payments
+# grpc-ecs-demo
 
 Two Go gRPC microservices taken from `localhost:50051` to AWS Fargate with **one
 set of Terraform modules** that applies to a local emulator and to real AWS.

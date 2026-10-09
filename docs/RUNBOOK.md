@@ -79,7 +79,7 @@ node --version    # 22+, only for the TypeScript client segment
 ## First run
 
 ```sh
-cd ~/projects/grpc-ecs-payments
+cd ~/projects/grpc-ecs-demo
 
 # 1. tests first - 7 packages, all offline
 make test

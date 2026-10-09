@@ -17,7 +17,7 @@ import (
 
 	"gorm.io/gorm"
 
-	productv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/product/v1"
+	productv1 "github.com/lakhansamani/grpc-ecs-demo/gen/go/product/v1"
 )
 
 // Product is a catalogue entry.

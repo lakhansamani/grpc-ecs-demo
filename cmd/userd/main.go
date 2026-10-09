@@ -13,12 +13,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
-	userv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/user/v1"
-	"github.com/lakhansamani/grpc-ecs-ecom/internal/platform/config"
-	"github.com/lakhansamani/grpc-ecs-ecom/internal/platform/grpcserver"
-	"github.com/lakhansamani/grpc-ecs-ecom/internal/platform/observability"
-	"github.com/lakhansamani/grpc-ecs-ecom/internal/platform/store"
-	"github.com/lakhansamani/grpc-ecs-ecom/internal/user"
+	userv1 "github.com/lakhansamani/grpc-ecs-demo/gen/go/user/v1"
+	"github.com/lakhansamani/grpc-ecs-demo/internal/platform/config"
+	"github.com/lakhansamani/grpc-ecs-demo/internal/platform/grpcserver"
+	"github.com/lakhansamani/grpc-ecs-demo/internal/platform/observability"
+	"github.com/lakhansamani/grpc-ecs-demo/internal/platform/store"
+	"github.com/lakhansamani/grpc-ecs-demo/internal/user"
 )
 
 const serviceName = "userd"

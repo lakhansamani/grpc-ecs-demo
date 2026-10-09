@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/lakhansamani/grpc-ecs-ecom/internal/platform/store"
+	"github.com/lakhansamani/grpc-ecs-demo/internal/platform/store"
 	"gorm.io/gorm"
 )
 

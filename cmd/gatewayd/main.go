@@ -34,12 +34,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
 
-	orderv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/order/v1"
-	productv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/product/v1"
-	userv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/user/v1"
-	"github.com/lakhansamani/grpc-ecs-ecom/internal/platform/config"
-	"github.com/lakhansamani/grpc-ecs-ecom/internal/platform/grpcclient"
-	"github.com/lakhansamani/grpc-ecs-ecom/internal/platform/observability"
+	orderv1 "github.com/lakhansamani/grpc-ecs-demo/gen/go/order/v1"
+	productv1 "github.com/lakhansamani/grpc-ecs-demo/gen/go/product/v1"
+	userv1 "github.com/lakhansamani/grpc-ecs-demo/gen/go/user/v1"
+	"github.com/lakhansamani/grpc-ecs-demo/internal/platform/config"
+	"github.com/lakhansamani/grpc-ecs-demo/internal/platform/grpcclient"
+	"github.com/lakhansamani/grpc-ecs-demo/internal/platform/observability"
 )
 
 const serviceName = "gatewayd"

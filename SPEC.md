@@ -1,4 +1,4 @@
-# grpc-ecs-payments — Specification
+# grpc-ecs-demo — Specification
 
 **Purpose:** demo repo for the talk *"Running Go gRPC Services on ECS: From LocalStack to Production Cloud"*
 **Speaker:** Lakhan Samani · AWS Community Day Vadodara · week of 2026-10-06
@@ -91,7 +91,7 @@ without `buf`.
 // proto/identity/v1/identity.proto
 syntax = "proto3";
 package identity.v1;
-option go_package = "github.com/lakhansamani/grpc-ecs-ecom/gen/go/identity/v1;identityv1";
+option go_package = "github.com/lakhansamani/grpc-ecs-demo/gen/go/identity/v1;identityv1";
 
 service IdentityService {
   rpc Register    (RegisterRequest)    returns (RegisterResponse);
@@ -114,7 +114,7 @@ message VerifyTokenResponse { User user = 1; }
 // proto/payment/v1/payment.proto
 syntax = "proto3";
 package payment.v1;
-option go_package = "github.com/lakhansamani/grpc-ecs-ecom/gen/go/payment/v1;paymentv1";
+option go_package = "github.com/lakhansamani/grpc-ecs-demo/gen/go/payment/v1;paymentv1";
 
 service PaymentService {
   rpc Authorize        (AuthorizeRequest)        returns (AuthorizeResponse);
@@ -343,7 +343,7 @@ transactions: id TEXT pk, user_id TEXT idx, amount_minor INT, currency TEXT,
 ## 7. Repo layout
 
 ```
-grpc-ecs-payments/
+grpc-ecs-demo/
 ├── go.mod                      # ONE module
 ├── buf.yaml  buf.gen.yaml
 ├── proto/{identity,payment}/v1/*.proto
@@ -691,5 +691,5 @@ plan. It is kept only for the research trail; `docs/evidence/` holds the 14 proj
    deployment.** See §6.8. The explanation provider defaults to `template` everywhere; the Bedrock
    client stays in the repo as reference code and is reachable via an endpoint override. No IAM
    permission, no model opt-in, no region constraint, no cost.
-4. **Repo name** — `grpc-ecs-payments` used throughout; one `git mv` + module rename to change.
+4. **Repo name** — `grpc-ecs-demo` used throughout; one `git mv` + module rename to change.
 5. **Push to GitHub?** Public repo for the audience to clone, and under which account.

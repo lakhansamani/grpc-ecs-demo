@@ -1,4 +1,4 @@
-module github.com/lakhansamani/grpc-ecs-ecom
+module github.com/lakhansamani/grpc-ecs-demo
 
 go 1.27.1
 

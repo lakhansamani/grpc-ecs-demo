@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
-	userv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/user/v1"
+	userv1 "github.com/lakhansamani/grpc-ecs-demo/gen/go/user/v1"
 )
 
 // A hand-rolled service with a deliberately slow method, so we can start an

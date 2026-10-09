@@ -12,9 +12,9 @@ import (
 	"google.golang.org/grpc/status"
 	"gorm.io/gorm"
 
-	orderv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/order/v1"
-	productv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/product/v1"
-	userv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/user/v1"
+	orderv1 "github.com/lakhansamani/grpc-ecs-demo/gen/go/order/v1"
+	productv1 "github.com/lakhansamani/grpc-ecs-demo/gen/go/product/v1"
+	userv1 "github.com/lakhansamani/grpc-ecs-demo/gen/go/user/v1"
 )
 
 // MaxPageSize caps ListOrders.

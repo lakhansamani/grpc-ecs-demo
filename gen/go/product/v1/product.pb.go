@@ -781,7 +781,7 @@ const file_product_v1_product_proto_rawDesc = "" +
 	"\n" +
 	"GetProduct\x12\x1d.product.v1.GetProductRequest\x1a\x1e.product.v1.GetProductResponse\"\x19\x82\xd3\xe4\x93\x02\x13\x12\x11/v1/products/{id}\x12t\n" +
 	"\x0eSearchProducts\x12!.product.v1.SearchProductsRequest\x1a\".product.v1.SearchProductsResponse\"\x1b\x82\xd3\xe4\x93\x02\x15\x12\x13/v1/products:search\x12`\n" +
-	"\x11CheckAvailability\x12$.product.v1.CheckAvailabilityRequest\x1a%.product.v1.CheckAvailabilityResponseBCZAgithub.com/lakhansamani/grpc-ecs-ecom/gen/go/product/v1;productv1b\x06proto3"
+	"\x11CheckAvailability\x12$.product.v1.CheckAvailabilityRequest\x1a%.product.v1.CheckAvailabilityResponseBCZAgithub.com/lakhansamani/grpc-ecs-demo/gen/go/product/v1;productv1b\x06proto3"
 
 var (
 	file_product_v1_product_proto_rawDescOnce sync.Once

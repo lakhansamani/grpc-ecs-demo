@@ -400,7 +400,7 @@ const file_user_v1_user_proto_rawDesc = "" +
 	"\vUserService\x12U\n" +
 	"\bRegister\x12\x18.user.v1.RegisterRequest\x1a\x19.user.v1.RegisterResponse\"\x14\x82\xd3\xe4\x93\x02\x0e:\x01*\"\t/v1/users\x12O\n" +
 	"\x05Login\x12\x15.user.v1.LoginRequest\x1a\x16.user.v1.LoginResponse\"\x17\x82\xd3\xe4\x93\x02\x11:\x01*\"\f/v1/sessions\x12^\n" +
-	"\vVerifyToken\x12\x1b.user.v1.VerifyTokenRequest\x1a\x1c.user.v1.VerifyTokenResponse\"\x14\x82\xd3\xe4\x93\x02\x0e\x12\f/v1/users/meB=Z;github.com/lakhansamani/grpc-ecs-ecom/gen/go/user/v1;userv1b\x06proto3"
+	"\vVerifyToken\x12\x1b.user.v1.VerifyTokenRequest\x1a\x1c.user.v1.VerifyTokenResponse\"\x14\x82\xd3\xe4\x93\x02\x0e\x12\f/v1/users/meB=Z;github.com/lakhansamani/grpc-ecs-demo/gen/go/user/v1;userv1b\x06proto3"
 
 var (
 	file_user_v1_user_proto_rawDescOnce sync.Once

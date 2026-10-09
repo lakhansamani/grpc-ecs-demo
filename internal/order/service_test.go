@@ -13,10 +13,10 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	orderv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/order/v1"
-	productv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/product/v1"
-	userv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/user/v1"
-	"github.com/lakhansamani/grpc-ecs-ecom/internal/platform/store"
+	orderv1 "github.com/lakhansamani/grpc-ecs-demo/gen/go/order/v1"
+	productv1 "github.com/lakhansamani/grpc-ecs-demo/gen/go/product/v1"
+	userv1 "github.com/lakhansamani/grpc-ecs-demo/gen/go/user/v1"
+	"github.com/lakhansamani/grpc-ecs-demo/internal/platform/store"
 )
 
 // --- fake upstreams: the point is to test orderd's logic, not the network ---
