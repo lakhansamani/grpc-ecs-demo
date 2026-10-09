@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package user.v1;
+
+import "google/api/annotations.proto";
+
+option go_package = "github.com/lakhansamani/grpc-ecs-payments/gen/go/user/v1;userv1";
+
+// UserService owns accounts and tokens.
+//
+// Stateless: its database is baked into the image, so every task answers reads
+// identically and the service scales horizontally. It is called by the REST
+// gateway AND by OrderService, which makes it the busiest hop in the system.
+service UserService {
+  rpc Register(RegisterRequest) returns (RegisterResponse) {
+    option (google.api.http) = {
+      post: "/v1/users"
+      body: "*"
+    };
+  }
+
+  rpc Login(LoginRequest) returns (LoginResponse) {
+    option (google.api.http) = {
+      post: "/v1/sessions"
+      body: "*"
+    };
+  }
+
+  // Resolves the caller from the "authorization" metadata. OrderService calls
+  // this on every CreateOrder rather than holding a signing key of its own.
+  rpc VerifyToken(VerifyTokenRequest) returns (VerifyTokenResponse) {
+    option (google.api.http) = {get: "/v1/users/me"};
+  }
+}
+
+message User {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+}
+
+message RegisterRequest {
+  string name = 1;
+  string email = 2;
+  string password = 3;
+}
+
+message RegisterResponse {
+  string user_id = 1;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string token = 1;
+  // Unix millis, so a client can refresh without parsing the JWT.
+  int64 expires_at = 2;
+}
+
+// The token travels in metadata ("authorization: Bearer <jwt>"), not the body.
+message VerifyTokenRequest {}
+
+message VerifyTokenResponse {
+  User user = 1;
+}

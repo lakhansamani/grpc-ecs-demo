@@ -32,8 +32,8 @@ no Docker, no AWS:
 
 ```sh
 make dev-seed        # once
-make dev-identityd   # terminal 1 — :50051
-make dev-paymentd    # terminal 2 — :50052
+make dev-userd   # terminal 1 — :50051
+make dev-orderd    # terminal 2 — :50052
 make dev-smoke       # terminal 3
 ```
 

@@ -27,7 +27,7 @@ You do **not** need the emulator to develop. Most of the time you should not run
 
 | Loop | Command | Restart | Catches |
 |---|---|---|---|
-| **1. `go run`** | `make dev-identityd` + `make dev-paymentd` | ~2s | business logic, rules, validation, auth, the contract |
+| **1. `go run`** | `make dev-userd` + `make dev-orderd` | ~2s | business logic, rules, validation, auth, the contract |
 | **2. docker build** | `docker build -f build/Dockerfile.*` | ~30s | CGO creeping in, file ownership, CA bundle, architecture |
 | **3. emulator** | `make local-up && make tf-local-apply` | ~60s | task definitions, env wiring, IAM, secret resolution, Terraform |
 | **4. real AWS** | `terraform -chdir=terraform/envs/aws apply` | ~2min | everything the emulator does not model |
@@ -37,13 +37,13 @@ You do **not** need the emulator to develop. Most of the time you should not run
 Three terminals. This is where most of the work happens.
 
 ```sh
-make dev-seed        # once: creates ./data/identity.db with the demo users
+make dev-seed        # once: creates ./data/user.db with the demo users
 
 # terminal 1
-make dev-identityd   # :50051, sqlite at ./data/identity.db
+make dev-userd   # :50051, sqlite at ./data/user.db
 
 # terminal 2
-make dev-paymentd    # :50052, talks to localhost:50051
+make dev-orderd    # :50052, talks to localhost:50051
 
 # terminal 3
 make dev-smoke       # or grpcurl / Postman against localhost directly

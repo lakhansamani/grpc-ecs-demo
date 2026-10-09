@@ -19,8 +19,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lakhansamani/grpc-ecs-payments/internal/identity"
 	"github.com/lakhansamani/grpc-ecs-payments/internal/platform/store"
+	"github.com/lakhansamani/grpc-ecs-payments/internal/user"
 )
 
 // SeedUsers are fixed so the demo is reproducible and the passwords can go on
@@ -32,7 +32,7 @@ var SeedUsers = []struct{ Name, Email, Password string }{
 }
 
 func main() {
-	dbURL := flag.String("db", "file:/data/identity.db", "sqlite database URL")
+	dbURL := flag.String("db", "file:/data/user.db", "sqlite database URL")
 	flag.Parse()
 
 	if err := run(*dbURL); err != nil {
@@ -41,11 +41,11 @@ func main() {
 }
 
 func run(dbURL string) error {
-	db, err := store.Open(store.Config{Driver: "sqlite", URL: dbURL}, identity.Models()...)
+	db, err := store.Open(store.Config{Driver: "sqlite", URL: dbURL}, user.Models()...)
 	if err != nil {
 		return err
 	}
-	s := identity.NewStore(db)
+	s := user.NewStore(db)
 	ctx := context.Background()
 
 	for _, u := range SeedUsers {
@@ -53,7 +53,7 @@ func run(dbURL string) error {
 		switch {
 		case err == nil:
 			fmt.Fprintf(os.Stdout, "seeded %s (%s)\n", u.Email, created.ID)
-		case errors.Is(err, identity.ErrEmailTaken):
+		case errors.Is(err, user.ErrEmailTaken):
 			// Idempotent: re-running the seeder must not fail the build.
 			fmt.Fprintf(os.Stdout, "exists %s\n", u.Email)
 		default:

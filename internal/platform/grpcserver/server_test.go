@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
-	identityv1 "github.com/lakhansamani/grpc-ecs-payments/gen/go/identity/v1"
+	userv1 "github.com/lakhansamani/grpc-ecs-payments/gen/go/user/v1"
 )
 
 // A hand-rolled service with a deliberately slow method, so we can start an
@@ -30,13 +30,13 @@ func slowDesc(delay time.Duration) *grpc.ServiceDesc {
 		Methods: []grpc.MethodDesc{{
 			MethodName: slowMethod,
 			Handler: func(_ any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
-				var req identityv1.VerifyTokenRequest
+				var req userv1.VerifyTokenRequest
 				if err := dec(&req); err != nil {
 					return nil, err
 				}
 				time.Sleep(delay)
-				return &identityv1.VerifyTokenResponse{
-					User: &identityv1.User{Id: "drained"},
+				return &userv1.VerifyTokenResponse{
+					User: &userv1.User{Id: "drained"},
 				}, nil
 			},
 		}},
@@ -122,15 +122,15 @@ func TestInFlightRPCSurvivesShutdown(t *testing.T) {
 
 	// Pointer, not value: a proto message carries a mutex and must not be copied.
 	type result struct {
-		resp *identityv1.VerifyTokenResponse
+		resp *userv1.VerifyTokenResponse
 		err  error
 	}
 	res := make(chan result, 1)
 	go func() {
-		out := &identityv1.VerifyTokenResponse{}
+		out := &userv1.VerifyTokenResponse{}
 		err := cc.Invoke(context.Background(),
 			"/"+slowService+"/"+slowMethod,
-			&identityv1.VerifyTokenRequest{}, out)
+			&userv1.VerifyTokenRequest{}, out)
 		res <- result{out, err}
 	}()
 
@@ -185,9 +185,9 @@ func TestShutdownTimeoutForcesStop(t *testing.T) {
 	}
 	cc := dial(t, grpcAddr)
 	go func() {
-		out := &identityv1.VerifyTokenResponse{}
+		out := &userv1.VerifyTokenResponse{}
 		_ = cc.Invoke(context.Background(), "/"+slowService+"/"+slowMethod,
-			&identityv1.VerifyTokenRequest{}, out)
+			&userv1.VerifyTokenRequest{}, out)
 	}()
 	time.Sleep(150 * time.Millisecond)
 	stop()

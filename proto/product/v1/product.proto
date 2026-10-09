@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package product.v1;
+
+import "google/api/annotations.proto";
+
+option go_package = "github.com/lakhansamani/grpc-ecs-payments/gen/go/product/v1;productv1";
+
+// ProductService is the catalogue: browse, search, and the authoritative
+// source of price and stock.
+//
+// Read-heavy by a wide margin - most browsing never becomes an order - which
+// is why this is the service that scales out during a sale.
+service ProductService {
+  rpc ListProducts(ListProductsRequest) returns (ListProductsResponse) {
+    option (google.api.http) = {get: "/v1/products"};
+  }
+
+  rpc GetProduct(GetProductRequest) returns (GetProductResponse) {
+    option (google.api.http) = {get: "/v1/products/{id}"};
+  }
+
+  // Full-text search over title and brand, ranked.
+  rpc SearchProducts(SearchProductsRequest) returns (SearchProductsResponse) {
+    option (google.api.http) = {get: "/v1/products:search"};
+  }
+
+  // NOTE: deliberately NO google.api.http option.
+  //
+  // This is an internal-only RPC that OrderService calls to get authoritative
+  // stock and pricing. The REST gateway exposes a SUBSET of the surface, and a
+  // client must never be able to ask "is this price real?" and then submit a
+  // different one.
+  rpc CheckAvailability(CheckAvailabilityRequest) returns (CheckAvailabilityResponse);
+}
+
+message Product {
+  string id = 1;
+  string sku = 2;
+  string title = 3;
+  string brand = 4;
+  string category = 5;
+  // Minor units (paise). Money is never a float.
+  int64 price_minor = 6;
+  string currency = 7;
+  int32 stock = 8;
+}
+
+message ListProductsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+  // Optional filter.
+  string category = 3;
+}
+
+message ListProductsResponse {
+  repeated Product products = 1;
+  string next_page_token = 2;
+}
+
+message GetProductRequest {
+  string id = 1;
+}
+
+message GetProductResponse {
+  Product product = 1;
+}
+
+message SearchProductsRequest {
+  string query = 1;
+  int32 page_size = 2;
+}
+
+message SearchProductsResponse {
+  repeated Product products = 1;
+  // How many matched before the page limit was applied.
+  int32 total_matches = 2;
+}
+
+// What the caller claims it wants to buy.
+message CartItem {
+  string product_id = 1;
+  int32 quantity = 2;
+}
+
+message CheckAvailabilityRequest {
+  repeated CartItem items = 1;
+}
+
+enum Availability {
+  AVAILABILITY_UNSPECIFIED = 0;
+  AVAILABILITY_OK = 1;
+  AVAILABILITY_OUT_OF_STOCK = 2;
+  AVAILABILITY_INSUFFICIENT_STOCK = 3;
+  AVAILABILITY_NOT_FOUND = 4;
+}
+
+message AvailabilityResult {
+  string product_id = 1;
+  Availability availability = 2;
+  // The price the catalogue says. OrderService uses THIS, never a
+  // client-supplied figure.
+  int64 unit_price_minor = 3;
+  string currency = 4;
+  int32 stock_remaining = 5;
+  string title = 6;
+}
+
+message CheckAvailabilityResponse {
+  repeated AvailabilityResult results = 1;
+  bool all_available = 2;
+}

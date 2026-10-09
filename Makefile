@@ -114,14 +114,14 @@ forward-stop:
 DEV_JWT_SECRET ?= local-dev-secret-not-for-anything-real
 DEV_DATA       ?= ./data
 
-dev-identityd:
+dev-userd:
 	@mkdir -p $(DEV_DATA)
 	JWT_SECRET=$(DEV_JWT_SECRET) \
-	DB_URL="file:$(DEV_DATA)/identity.db" \
+	DB_URL="file:$(DEV_DATA)/user.db" \
 	GRPC_ADDR=":50051" METRICS_ADDR=":9091" \
 	go run ./cmd/identityd
 
-dev-paymentd:
+dev-orderd:
 	@mkdir -p $(DEV_DATA)
 	IDENTITY_ADDR="localhost:50051" \
 	DB_URL="file:$(DEV_DATA)/payment.db" \
@@ -131,7 +131,7 @@ dev-paymentd:
 # Seed the dev database with the same users the image bakes in.
 dev-seed:
 	@mkdir -p $(DEV_DATA)
-	go run ./cmd/seed -db "file:$(DEV_DATA)/identity.db"
+	go run ./cmd/seed -db "file:$(DEV_DATA)/user.db"
 
 # Smoke test loop 1 (talks to localhost, not to the task network).
 dev-smoke:

@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package order.v1;
+
+import "google/api/annotations.proto";
+
+option go_package = "github.com/lakhansamani/grpc-ecs-payments/gen/go/order/v1;orderv1";
+
+// OrderService writes orders.
+//
+// It is the only stateful service here, so it runs as ONE task - and that is
+// the point: you scale reads, not writes. Every CreateOrder makes TWO outbound
+// gRPC calls: UserService to find out who is asking, and ProductService to find
+// out what things actually cost.
+service OrderService {
+  rpc CreateOrder(CreateOrderRequest) returns (CreateOrderResponse) {
+    option (google.api.http) = {
+      post: "/v1/orders"
+      body: "*"
+    };
+  }
+
+  rpc GetOrder(GetOrderRequest) returns (GetOrderResponse) {
+    option (google.api.http) = {get: "/v1/orders/{id}"};
+  }
+
+  rpc ListOrders(ListOrdersRequest) returns (ListOrdersResponse) {
+    option (google.api.http) = {get: "/v1/orders"};
+  }
+}
+
+enum OrderStatus {
+  ORDER_STATUS_UNSPECIFIED = 0;
+  ORDER_STATUS_CONFIRMED = 1;
+  ORDER_STATUS_REJECTED = 2;
+}
+
+enum RejectionReason {
+  REJECTION_REASON_UNSPECIFIED = 0;
+  REJECTION_REASON_OUT_OF_STOCK = 1;
+  REJECTION_REASON_INSUFFICIENT_STOCK = 2;
+  REJECTION_REASON_PRODUCT_NOT_FOUND = 3;
+  REJECTION_REASON_EMPTY_CART = 4;
+}
+
+// A line on a confirmed order. unit_price_minor is what ProductService said,
+// never what the client sent.
+message OrderLine {
+  string product_id = 1;
+  string title = 2;
+  int32 quantity = 3;
+  int64 unit_price_minor = 4;
+  int64 line_total_minor = 5;
+}
+
+message Order {
+  string id = 1;
+  string user_id = 2;
+  repeated OrderLine lines = 3;
+  int64 total_minor = 4;
+  string currency = 5;
+  OrderStatus status = 6;
+  RejectionReason rejection_reason = 7;
+  // Unix millis.
+  int64 created_at = 8;
+}
+
+// What the client asks for. NOTE there is no price field: the client does not
+// get a say in what things cost.
+message RequestedItem {
+  string product_id = 1;
+  int32 quantity = 2;
+}
+
+message CreateOrderRequest {
+  repeated RequestedItem items = 1;
+  // Retries must not create two orders.
+  string idempotency_key = 2;
+}
+
+message CreateOrderResponse {
+  Order order = 1;
+  // True when a repeated idempotency_key returned the existing order rather
+  // than placing a new one.
+  bool idempotent_replay = 2;
+}
+
+message GetOrderRequest {
+  string id = 1;
+}
+
+message GetOrderResponse {
+  Order order = 1;
+}
+
+message ListOrdersRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message ListOrdersResponse {
+  repeated Order orders = 1;
+  string next_page_token = 2;
+}

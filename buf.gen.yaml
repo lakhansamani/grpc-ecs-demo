@@ -12,11 +12,21 @@ plugins:
     out: gen/go
     opt: paths=source_relative
 
+  # ---- REST: a JSON/HTTP reverse proxy, generated from the SAME protos ----
+  # Only the RPCs carrying a google.api.http option get a route. The gateway
+  # exposes a deliberate SUBSET - e.g. ProductService.CheckAvailability has no
+  # annotation and so is unreachable from the internet.
+  - remote: buf.build/grpc-ecosystem/gateway:v2.31.0
+    out: gen/go
+    opt: paths=source_relative
+  # ---- and the OpenAPI spec the frontend team actually asks for ----
+  - remote: buf.build/grpc-ecosystem/openapiv2:v2.31.0
+    out: gen/openapi
+    opt:
+      - allow_merge=true
+      - merge_file_name=api
+
   # ---- TypeScript: messages + service descriptors ----
-  # protoc-gen-es v2 emits both, and Connect builds clients from the
-  # descriptor at runtime - so there is no second plugin to pin.
-  # Same .proto, same `buf generate`, two languages. This is the single most
-  # common real reason teams adopt gRPC (see SPEC.md 14.3).
   - remote: buf.build/bufbuild/es:v2.16.0
     out: clients/node/src/gen
     opt: target=ts
