@@ -10,7 +10,7 @@ variable "gateway_image" { type = string }
 variable "operator_ingress_cidrs" {
   type        = list(string)
   default     = []
-  description = "Your public IP as a /32 so the demo client can reach paymentd. Keep this tight."
+  description = "Your public IP as a /32 so the demo client can reach gatewayd. Keep this tight."
 }
 # Region lives here so you can switch without editing the stack. Fargate ARM64
 # is available in all commercial regions, so any of them works.
@@ -54,8 +54,16 @@ variable "enable_execute_command" {
   default = true
 }
 
+variable "lb_policy" {
+  type        = string
+  default     = "round_robin"
+  description = "pick_first redeploys orderd with the load-balancing bug, for the live demo."
+}
+
 module "stack" {
   source = "../../stack"
+
+  lb_policy = var.lb_policy
 
   environment        = "aws"
   aws_region         = var.aws_region
@@ -78,7 +86,6 @@ module "stack" {
   otlp_endpoint = ""
 
   # No Bedrock access on this deployment. See SPEC.md 6.8.
-  llm_provider = "template"
 
   existing_execution_role_arn = var.existing_execution_role_arn
   use_secrets_manager         = var.use_secrets_manager

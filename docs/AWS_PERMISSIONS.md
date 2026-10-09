@@ -52,13 +52,13 @@ miserable thing to debug on the day.
         "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:GetRolePolicy",
         "iam:ListRolePolicies", "iam:ListInstanceProfilesForRole"
       ],
-      "Resource": "arn:aws:iam::*:role/payments-aws-*"
+      "Resource": "arn:aws:iam::*:role/ecom-aws-*"
     },
     {
       "Sid": "PassRoleToEcsTasksOnly",
       "Effect": "Allow",
       "Action": "iam:PassRole",
-      "Resource": "arn:aws:iam::*:role/payments-aws-*",
+      "Resource": "arn:aws:iam::*:role/ecom-aws-*",
       "Condition": { "StringEquals": { "iam:PassedToService": "ecs-tasks.amazonaws.com" } }
     },
     {
@@ -121,12 +121,12 @@ miserable thing to debug on the day.
 }
 ```
 
-IAM is scoped to `payments-aws-*` so nobody has to grant blanket role creation.
+IAM is scoped to `ecom-aws-*` so nobody has to grant blanket role creation.
 The rest use `*` because Terraform needs List/Describe calls that do not accept
 a narrower resource.
 
-**Not needed, so do not ask for it:** Bedrock (the explanation provider is a
-local template — SPEC.md 6.8), RDS (SQLite lives on the task — SPEC.md 6), ELB
+**Not needed, so do not ask for it:** Bedrock (there is no LLM in this demo at
+all), RDS (SQLite lives on the task — SPEC.md 6), ELB
 (the ALB segment is above the cut line), S3 (Terraform state is local).
 
 ## Demo-minimum vs. nice-to-have — and the fallbacks are real code
@@ -187,7 +187,7 @@ Ordered by how much it hurts.
 ## What to send your admin
 
 > I need to deploy an ECS Fargate demo. I already have ECS, ECR and EC2. I also
-> need IAM (scoped to roles named `payments-aws-*`, including `PassRole`
+> need IAM (scoped to roles named `ecom-aws-*`, including `PassRole`
 > conditioned on `ecs-tasks.amazonaws.com`), CloudWatch Logs, Secrets Manager,
 > and Cloud Map plus the Route 53 permissions it depends on. Policy attached.
 > No Bedrock, RDS, ELB or S3 needed.

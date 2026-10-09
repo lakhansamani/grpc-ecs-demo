@@ -122,7 +122,7 @@ func (s *Service) VerifyToken(ctx context.Context, _ *userv1.VerifyTokenRequest)
 }
 
 // BearerFromContext pulls a bearer token out of gRPC metadata.
-// Exported because paymentd forwards the same header and needs identical parsing.
+// Exported because orderd forwards the same header and needs identical parsing.
 func BearerFromContext(ctx context.Context) (string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {

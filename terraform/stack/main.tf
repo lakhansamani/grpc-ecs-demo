@@ -6,7 +6,7 @@
 
 variable "name_prefix" {
   type    = string
-  default = "payments"
+  default = "ecom"
 }
 variable "aws_region" { type = string }
 variable "availability_zones" { type = list(string) }
@@ -15,6 +15,20 @@ variable "namespace" {
   default = "ecom.local"
 }
 variable "environment" { type = string }
+
+# Demo lever, not a production knob. "pick_first" redeploys orderd with
+# grpc-go's DEFAULT client behaviour - one connection, one upstream task, no
+# matter how many tasks Cloud Map returns. That is the bug the talk is about,
+# and this is how you show it live instead of describing it.
+variable "lb_policy" {
+  type    = string
+  default = "round_robin"
+
+  validation {
+    condition     = contains(["round_robin", "pick_first"], var.lb_policy)
+    error_message = "lb_policy must be round_robin (the fix) or pick_first (the bug)."
+  }
+}
 
 variable "user_image" { type = string }
 variable "product_image" { type = string }
@@ -55,11 +69,6 @@ variable "operator_ingress_cidrs" {
   description = "CIDRs allowed to reach the task ports directly, e.g. [\"203.0.113.4/32\"]."
 }
 
-variable "llm_provider" {
-  type        = string
-  default     = "template"
-  description = "template (no network, no credentials) or bedrock. The deployment has no Bedrock access, so template."
-}
 variable "otlp_endpoint" {
   type        = string
   default     = ""
@@ -182,7 +191,7 @@ module "secrets" {
 }
 
 # Fallback secret for use_secrets_manager = false. Still ONE value shared by
-# every identityd task, which is the property that actually matters.
+# every userd task, which is the property that actually matters.
 resource "random_password" "jwt_plain" {
   count   = var.use_secrets_manager || var.jwt_secret_plain != "" ? 0 : 1
   length  = 48
@@ -309,6 +318,8 @@ module "orderd" {
     OTEL_EXPORTER_OTLP_ENDPOINT = var.otlp_endpoint
     GRPC_MAX_CONNECTION_AGE     = "30s"
     SHUTDOWN_TIMEOUT            = "15s"
+    # Only read when it equals "pick_first"; see internal/platform/grpcclient.
+    LB_POLICY = var.lb_policy
   }
 
   log_group_name           = module.cluster.log_group_name

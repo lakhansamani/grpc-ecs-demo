@@ -1,25 +1,35 @@
 # grpc-ecs-demo
 
-Two Go gRPC microservices taken from `localhost:50051` to AWS Fargate with **one
-set of Terraform modules** that applies to a local emulator and to real AWS.
+Four Go services taken from `localhost:50051` to AWS Fargate with **one set of
+Terraform modules** that applies to a local emulator and to real AWS.
 
 Demo repo for the talk *"Running Go gRPC Services on ECS: From LocalStack to
 Production Cloud"* — AWS Community Day Vadodara, October 2026.
 
 ```
- demo-client / Postman ──unary──> paymentd ──────> SQLite (task-local)
-                                     │
-                                     ├──gRPC────> identityd ──> SQLite (baked into the image)
-                                     │            VerifyToken
-                                     └──────────> explain: template (Bedrock opt-in)
+  browser / Postman ──REST──> gatewayd ──gRPC──┬──> userd ──────> SQLite (baked into the image)
+                              (generated,      │
+                               not written)    ├──> productsd ──> SQLite + FTS5 (baked in)
+                                               │
+                                               └──> orderd ─────> SQLite (task-local, writable)
+                                                      │
+       grpcurl / Postman ──gRPC──────────────────────>┤
+                                                      ├──gRPC──> userd.VerifyToken
+                                                      └──gRPC──> productsd.CheckAvailability
 
-        both ──OTLP──> Jaeger    both ──:909x/metrics──> Prometheus
+        all ──OTLP──> Jaeger        all ──:909x/metrics──> Prometheus
 ```
 
-| Service | Role | Tasks |
-|---|---|---|
-| `identityd` | users, passwords, JWTs. Stateless — its database is baked into the image | **3** (the one you scale) |
-| `paymentd` | issuer-side authorization: rules decide approve/decline | **1** (holds writable state) |
+| Service | Role | Tasks | Why that count |
+|---|---|---|---|
+| `userd` | accounts, passwords, JWTs | **3** | stateless, database baked into the image — **this is the one you scale** |
+| `productsd` | search, list, get, internal availability check | **3** | same shape: read-only, identical on every task |
+| `orderd` | places orders; calls the other two | **1** | it *writes*, so N tasks would mean N divergent databases |
+| `gatewayd` | REST → gRPC, generated from the protos | 1–N | stores nothing |
+
+**The point of three services:** during a sale, browsing goes up far more than
+buying. `productsd` and `userd` can scale with the reads; `orderd` must not.
+Scale the reads, not the writes.
 
 Every RPC is unary. [Measured across 14 real projects](docs/evidence), streaming
 is the minority almost everywhere — and every ECS lesson here survives without
@@ -27,36 +37,36 @@ it, because the load-balancing bug is connection-level, not stream-level.
 
 ## Quick start
 
-**You do not need the emulator to develop.** Fastest loop first — two terminals,
-no Docker, no AWS:
+**You do not need the emulator to develop.** Fastest loop first — no Docker, no
+AWS, restart in about two seconds:
 
 ```sh
-make dev-seed        # once
-make dev-userd   # terminal 1 — :50051
-make dev-orderd    # terminal 2 — :50052
-make dev-smoke       # terminal 3
+make dev-seed        # once: ./data/user.db and ./data/product.db
+make dev-userd       # terminal 1 — :50051
+make dev-productsd   # terminal 2 — :50053
+make dev-orderd      # terminal 3 — :50052, dials the other two
+make dev-gatewayd    # terminal 4 — :8080 REST
+make dev-smoke       # terminal 5 — the gRPC flow
+make dev-rest        #            — the same flow over curl
 ```
 
-That exercises both services and the real gRPC hop between them. Restart is
-about two seconds. Reach for the emulator when you need ECS itself:
+Reach for the emulator when you need ECS itself:
 
 ```sh
-make test          # 7 packages, fully offline
-make local-up      # the AWS emulator + jaeger
-
-docker build --platform linux/arm64 -f build/Dockerfile.identityd \
-  -t identityd:0.1.0 -t localhost:4566/identityd:0.1.0 .
-docker build --platform linux/arm64 -f build/Dockerfile.paymentd \
-  -t paymentd:0.1.0 -t localhost:4566/paymentd:0.1.0 .
-
+make test             # 8 packages, fully offline
+make local-up         # emulator :4566, jaeger :16686, prometheus :9090
+make images           # four ARM64 distroless images
 make tf-local-apply   # terraform apply -> real ECS tasks, then re-aliases DNS
 make ps               # prove it is ECS, not docker compose
-make demo             # approved + declined + explained, end to end
+make demo             # browse, log in, order, get rejected — end to end
 make forward          # publish ports so Postman/grpcurl can reach the tasks
+make api-coverage     # every RPC and every REST route, and what was missed
 ```
 
-Full walkthrough, including what is **not** testable locally:
-[`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+Full walkthrough — local inspection of every AWS component, manual tests and
+the stage-by-stage demo: [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md).
+Architecture and what each AWS component is for:
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## What this demonstrates
 
@@ -80,7 +90,7 @@ required:
 ```go
 // client: balance per RPC, and resolve every A record (a bare host:port
 // uses the passthrough resolver and yields ONE address)
-grpc.NewClient("dns:///identityd.ecom.local:50051",
+grpc.NewClient("dns:///userd.ecom.local:50051",
     grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`))
 
 // server: recycle connections so clients re-resolve after a scale-out
@@ -88,6 +98,17 @@ grpc.KeepaliveParams(keepalive.ServerParameters{
     MaxConnectionAge:      30 * time.Second,
     MaxConnectionAgeGrace: 5 * time.Second,
 })
+```
+
+Both halves ship in [`internal/platform/grpcclient`](internal/platform/grpcclient)
+and [`internal/platform/grpcserver`](internal/platform/grpcserver). To show the
+bug live rather than describe it, redeploy `orderd` with the client reverted to
+grpc-go's defaults:
+
+```sh
+terraform -chdir=terraform/envs/local apply -auto-approve -var lb_policy=pick_first
+make dns && make scale N=3 && make forward && make demo-load   # one task takes everything
+terraform -chdir=terraform/envs/local apply -auto-approve      # back to the fix
 ```
 
 ## What each service stores
@@ -115,18 +136,15 @@ Each of these is a trade-off, not an accident. `SPEC.md` has the reasoning.
   minutes of every apply and ~$12–15/month if you forget to destroy it, so
   dropping it takes the AWS apply from ~10 minutes to ~2. That is the only
   reason it is not here; for anything handling real payments, use RDS. The
-  module is written and kept in `terraform/modules/rds`, just not applied by
-  default — `DB_DRIVER=postgres` is the switch. Two things worth keeping even
+  application side is already driver-agnostic — `DB_DRIVER=postgres` plus a DSN
+  in `DB_URL` is the whole switch (see
+  [`internal/platform/store`](internal/platform/store)); there is no RDS
+  Terraform module in this repo, because adding one is the easy half. Two
+  things worth keeping even
   if you never ship SQLite: it needs the **pure-Go** driver
   (`glebarez/sqlite`), because `gorm.io/driver/sqlite` requires CGO and breaks
   the static distroless build; and **EFS is not a workaround** — SQLite's own
   docs warn that network filesystems lead to database corruption.
-- **A template, not an LLM, writes decline explanations.** Deterministic rules
-  decide; the explainer only phrases it. For a regulated decline that is the
-  better engineering choice — auditable, instant, and incapable of inventing a
-  reason. The Bedrock client is there, opt-in, and its endpoint comes from the
-  SDK's own `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, so **there is no `if local`
-  branch anywhere in the codebase**.
 - **No NAT Gateway.** ~$32/month plus data is the fastest way to bleed a demo
   account. Public subnets with `assign_public_ip`; VPC endpoints in production.
 - **`int64` minor units for money**, never a float.
@@ -137,7 +155,8 @@ Each of these is a trade-off, not an accident. `SPEC.md` has the reasoning.
 |---|---|
 | [`PRESENTATION.md`](PRESENTATION.md) | the talk itself — 21 slides with speaker notes. Renders with Marp, reads fine on GitHub |
 | [`SPEC.md`](SPEC.md) | the full specification, with every claim marked verified or not |
-| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | step-by-step local demo, and the local/AWS capability matrix |
+| [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md) | **start here.** Fresh-laptop command sequence, inspecting every AWS component locally, manual tests, and the demo beat by beat |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | the diagram, and what ECS / Fargate / task definition / Route 53 each are, why they are here and how they are used |
 | [`docs/DEPLOY_AWS.md`](docs/DEPLOY_AWS.md) | step by step onto a real AWS account, and how to tear it down |
 | [`docs/AWS_PERMISSIONS.md`](docs/AWS_PERMISSIONS.md) | exactly what IAM you need, and what to skip |
 | [`docs/DEMO_ACCESS.md`](docs/DEMO_ACCESS.md) | reaching the services from Postman: public IP vs. SSM port forwarding vs. ALB |
@@ -155,11 +174,12 @@ Uses [Ministack](https://github.com/ministackorg/ministack) (MIT) rather than
 LocalStack. LocalStack retired its free Community edition in March 2026, and
 ECS, ECR, ELB and Cloud Map were **never** in the free image — verified by
 listing `localstack/services/` at tags v1.4.0 through v4.0.0. Ministack runs ECS
-tasks as real Docker containers, and emulates ECR, Cloud Map, Secrets Manager,
-SSM and Bedrock.
+tasks as real Docker containers, and emulates ECR, Cloud Map, Secrets Manager
+and SSM.
 
-Its limits are documented rather than hidden — see the matrix in
-[`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+Its limits are documented rather than hidden — see
+[`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md) §3, which also shows how to inspect
+each emulated service with the ordinary `aws` CLI.
 
 ## License
 

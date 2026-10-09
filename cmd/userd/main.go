@@ -1,4 +1,4 @@
-// Command identityd serves UserService.
+// Command userd serves UserService.
 //
 // Stateless by design: its SQLite database is baked into the image, so every
 // task answers reads identically and the service can be scaled horizontally.

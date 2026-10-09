@@ -157,7 +157,7 @@ Then reach `gatewayd`. Two options — the second is better, see
 **a) Public IP** (needs `operator_ingress_cidrs` set above):
 
 ```sh
-CLUSTER=payments-aws
+CLUSTER=ecom-aws
 TASK=$(aws ecs list-tasks --cluster $CLUSTER --service-name gatewayd \
   --query 'taskArns[0]' --output text)
 ENI=$(aws ecs describe-tasks --cluster $CLUSTER --tasks "$TASK" \
@@ -190,8 +190,8 @@ This is the only segment that needs more than one task, and on AWS **Cloud Map
 does the DNS for real** — no alias shim.
 
 ```sh
-aws ecs update-service --cluster payments-aws --service userd --desired-count 3
-aws ecs describe-services --cluster payments-aws --services userd \
+aws ecs update-service --cluster ecom-aws --service userd --desired-count 3
+aws ecs describe-services --cluster ecom-aws --services userd \
   --query 'services[0].{Desired:desiredCount,Running:runningCount}'
 ```
 

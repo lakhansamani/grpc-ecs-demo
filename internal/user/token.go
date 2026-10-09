@@ -12,7 +12,7 @@ const TokenTTL = 24 * time.Hour
 
 // Issuer mints and verifies JWTs.
 //
-// Note on the shared secret: with identityd scaled to several tasks, every task
+// Note on the shared secret: with userd scaled to several tasks, every task
 // MUST hold the same secret or a token minted by one fails on another, which
 // looks exactly like a load-balancing bug. The secret comes from Secrets
 // Manager via the task definition, never from the image. See SPEC.md 6.6.

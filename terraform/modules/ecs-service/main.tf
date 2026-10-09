@@ -1,5 +1,5 @@
-# One reusable ECS service. Instantiated twice: identityd (stateless, scaled)
-# and paymentd (stateful, single task).
+# One reusable ECS service. Instantiated four times: userd and productsd
+# (stateless, scalable), orderd (stateful, single task) and gatewayd (REST).
 #
 # The ECS-specific lessons of the talk live in this file - see the comments on
 # stop_timeout, the healthCheck block and service discovery.
@@ -267,7 +267,7 @@ resource "aws_ecs_service" "this" {
   }
 
   # A single-task stateful service cannot run two copies at once, so a deploy
-  # must stop the old task before starting the new one. For identityd the
+  # must stop the old task before starting the new one. For userd the
   # defaults (200/100) give a rolling, zero-downtime deploy instead.
   deployment_minimum_healthy_percent = var.desired_count > 1 ? 100 : 0
   deployment_maximum_percent         = var.desired_count > 1 ? 200 : 100

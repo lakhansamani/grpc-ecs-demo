@@ -68,7 +68,7 @@ func Init(ctx context.Context, cfg Config) (trace.TracerProvider, Shutdown, erro
 	)
 	otel.SetTracerProvider(tp)
 	// Without a propagator, the trace context never crosses the service
-	// boundary and paymentd -> identityd shows up as two unrelated traces.
+	// boundary and orderd -> userd shows up as two unrelated traces.
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{}, propagation.Baggage{},
 	))

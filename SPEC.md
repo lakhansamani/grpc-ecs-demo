@@ -424,8 +424,8 @@ the "byte-identical modules" claim holds without an asterisk.
 
 ## 10. Local environment
 
-`compose.yaml`: `ministack` (:4566) + `redis` + `jaeger` + `prometheus`, all on the `ecom-local`
-Docker network, with `DOCKER_NETWORK=ecom-local` so Ministack-launched ECS tasks join it. **No
+`compose.yaml`: `ministack` (:4566) + `redis` + `jaeger` + `prometheus`, all on the `ecom-infra`
+Docker network, with `DOCKER_NETWORK=ecom-infra` so Ministack-launched ECS tasks join it. **No
 postgres service** — there is no RDS now, and SQLite lives inside the task.
 
 `ollama` is a compose **profile** (`make llm-up`): Ministack's `MINISTACK_BEDROCK_PROXY_URL`

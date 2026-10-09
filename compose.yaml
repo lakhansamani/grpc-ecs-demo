@@ -20,15 +20,10 @@ services:
       - REDIS_PORT=6379
       # Put ECS tasks + RDS containers on the same network as jaeger/prometheus,
       # otherwise a task cannot reach jaeger:4317.
-      - DOCKER_NETWORK=ecom-local
-      # Real LLM text locally instead of the canned mock reply. Ministack
-      # translates Converse -> OpenAI /chat/completions -> back to Converse,
-      # and falls back to the mock *silently* if this is unreachable --
-      # which is exactly what you want on a conference stage.
-      - MINISTACK_BEDROCK_PROXY_URL=http://ollama:11434/v1
+      - DOCKER_NETWORK=ecom-infra
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    networks: [ecom-local]
+    networks: [ecom-infra]
     depends_on:
       redis:
         condition: service_healthy
@@ -42,7 +37,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: ministack-redis
-    networks: [ecom-local]
+    networks: [ecom-infra]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -55,24 +50,28 @@ services:
     ports:
       - "16686:16686" # UI
       - "4317:4317" # OTLP gRPC
-    networks: [ecom-local]
+    networks: [ecom-infra]
 
-  # Optional: `docker compose --profile llm up -d ollama` then
-  #           `docker compose exec ollama ollama pull llama3.2:1b`
-  # Skipped by default so `make local-up` stays fast and offline-friendly.
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    profiles: [llm]
+  # Scrapes the ECS task containers. The `task` label is what makes the
+  # load-balancing demo visible: you can see one task taking all the traffic.
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: prometheus
+    # The image runs as nobody, which cannot read the Docker socket, and
+    # docker_sd_configs then fails with "permission denied" while the
+    # container itself looks perfectly healthy. Local demo only.
+    user: root
     ports:
-      - "11434:11434"
+      - "9090:9090"
     volumes:
-      - ollama-models:/root/.ollama
-    networks: [ecom-local]
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=1h
+    networks: [ecom-infra]
 
-volumes:
-  ollama-models:
 
 networks:
-  ecom-local:
-    name: ecom-local
+  ecom-infra:
+    name: ecom-infra

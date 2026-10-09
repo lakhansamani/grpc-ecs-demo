@@ -36,7 +36,7 @@ Tasks already run in public subnets with `assign_public_ip = true` (there is no
 NAT Gateway, by design). Get the address with:
 
 ```sh
-aws ecs describe-tasks --cluster payments-aws --tasks <arn> \
+aws ecs describe-tasks --cluster ecom-aws --tasks <arn> \
   --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' --output text
 aws ec2 describe-network-interfaces --network-interface-ids <eni> \
   --query 'NetworkInterfaces[0].Association.PublicIp' --output text
@@ -52,13 +52,13 @@ room's NAT surprises you.
 
 ```sh
 # needs enable_execute_command = true (the default in envs/aws)
-TASK=$(aws ecs list-tasks --cluster payments-aws --service-name paymentd \
+TASK=$(aws ecs list-tasks --cluster ecom-aws --service-name paymentd \
   --query 'taskArns[0]' --output text)
-RUNTIME=$(aws ecs describe-tasks --cluster payments-aws --tasks "$TASK" \
+RUNTIME=$(aws ecs describe-tasks --cluster ecom-aws --tasks "$TASK" \
   --query 'tasks[0].containers[0].runtimeId' --output text)
 
 aws ssm start-session \
-  --target "ecs:payments-aws_${TASK##*/}_${RUNTIME}" \
+  --target "ecs:ecom-aws_${TASK##*/}_${RUNTIME}" \
   --document-name AWS-StartPortForwardingSession \
   --parameters '{"localPortNumber":["50052"],"portNumber":["50052"]}'
 ```

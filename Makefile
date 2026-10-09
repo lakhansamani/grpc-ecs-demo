@@ -2,21 +2,24 @@
 SHELL := /bin/bash
 TF    := terraform -chdir=terraform/envs/local
 
-.PHONY: local-up local-down llm-up tf-local-apply tf-local-destroy dns demo demo-load scale test
+# The emulator accepts any credentials, but the AWS CLI refuses to send a
+# request without some. Prefixed onto every local `aws` call below so these
+# targets work in a shell that has never been configured for AWS.
+LOCAL_AWS := AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1 \
+             aws --endpoint-url http://localhost:4566
+
+.PHONY: local-up local-down tf-local-apply tf-local-destroy dns demo demo-load \
+        scale test ps ps-aws forward forward-stop images api-coverage show-guard \
+        proto proto-breaking ts-demo
 
 local-up:                      ## emulator + observability
-	docker compose up -d ministack redis jaeger
+	docker compose up -d ministack redis jaeger prometheus
 	@until [ "$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:4566/_ministack/health)" = 200 ]; do sleep 1; done
 	@echo "ministack ready on :4566"
 
 local-down:
 	docker compose down
 
-# Optional: real LLM prose locally instead of Ministack's canned mock reply.
-llm-up:
-	docker compose --profile llm up -d ollama
-	docker compose exec ollama ollama pull llama3.2:1b
-	docker compose restart ministack
 
 # Always re-alias after an apply: new task containers, new container ids, so
 # the previous aliases are gone with the old containers.
@@ -35,8 +38,8 @@ tf-local-destroy:
 # records for a shared alias, which is what makes the local load-balancing demo
 # possible at all.
 # NOTE: ONE regex filter, not two name filters. Docker ORs multiple
-# --filter name= values, so "name=ministack-ecs-" plus "name=identityd" matches
-# every task and would alias paymentd's container as identityd.ecom.local -
+# --filter name= values, so "name=ministack-ecs-" plus "name=userd" matches
+# every task and would alias orderd's container as userd.ecom.local -
 # a silent, demo-breaking misroute.
 dns:
 	@docker network create ecom-dns >/dev/null 2>&1 || true
@@ -63,7 +66,7 @@ ps:
 
 # Same, against real AWS (no endpoint override).
 ps-aws:
-	@CLUSTER=payments-aws bash scripts/ps.sh
+	@CLUSTER=ecom-aws bash scripts/ps.sh
 
 test:
 	go test ./...
@@ -72,21 +75,28 @@ test:
 demo:
 	bash scripts/smoke.sh
 
-# Authenticates as a SEEDED user, never a freshly registered one: a Register'd
-# user exists on exactly one identityd task (SPEC.md 6.4).
+# Sustained load through orderd, so every request makes orderd call
+# userd.VerifyToken - the hop the load-balancing demo is about.
+# Needs `make forward` first, and authenticates as a SEEDED user.
 demo-load:
-	go run ./cmd/demo-client -mode=load
+	@bash scripts/load.sh
 
-# Scale a stateless service. SVC defaults to userd, the busiest hop.
+# Scale a stateless service. SCALE_SVC defaults to userd, the busiest hop.
+#
+# To demonstrate the BUG before the fix, redeploy orderd with the broken
+# client first:
+#   terraform -chdir=terraform/envs/local apply -auto-approve -var lb_policy=pick_first
+# then `make scale N=3 && make demo-load` and watch one task take everything.
+# Re-apply without the variable to show the fix.
 SCALE_SVC ?= userd
 scale:
-	aws --endpoint-url http://localhost:4566 ecs update-service \
-		--cluster payments-local --service $(SCALE_SVC) --desired-count $(N) >/dev/null
+	@$(LOCAL_AWS) ecs update-service \
+		--cluster ecom-local --service $(SCALE_SVC) --desired-count $(N) >/dev/null
 	@echo "waiting for the new tasks to come up..."
 	@sleep 20
 	@$(MAKE) --no-print-directory dns
-	@aws --endpoint-url http://localhost:4566 ecs describe-services \
-		--cluster payments-local --services $(SCALE_SVC) \
+	@$(LOCAL_AWS) ecs describe-services \
+		--cluster ecom-local --services $(SCALE_SVC) \
 		--query 'services[0].{Service:serviceName,Desired:desiredCount,Running:runningCount}' --output table
 
 # Terraform refuses to scale the one service that writes.
@@ -117,7 +127,8 @@ forward: dns
 	@bash scripts/forward.sh
 
 forward-stop:
-	@docker rm -f forward-identityd forward-paymentd >/dev/null 2>&1 || true
+	@docker rm -f forward-userd forward-productsd forward-orderd forward-gatewayd \
+		>/dev/null 2>&1 || true
 	@echo "forwarders stopped"
 
 # ---- loop 1: no docker, no emulator, fastest possible ----

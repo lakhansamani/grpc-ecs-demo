@@ -75,7 +75,7 @@ func TestVerifyRejectsAlgNone(t *testing.T) {
 	unsigned, err := jwt.NewWithClaims(jwt.SigningMethodNone, claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   "attacker",
-			Issuer:    "identityd",
+			Issuer:    "userd",
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 		},
 	}).SignedString(jwt.UnsafeAllowNoneSignatureType)

@@ -67,7 +67,7 @@ resource "aws_route_table_association" "public" {
 }
 
 # One security group for all tasks. Task-to-task traffic is allowed by the
-# self-referencing rule, which is how paymentd reaches identityd privately.
+# self-referencing rule, which is how orderd reaches userd and productsd privately.
 resource "aws_security_group" "tasks" {
   name        = "${var.name}-tasks"
   description = "ECS tasks"

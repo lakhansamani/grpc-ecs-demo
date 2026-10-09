@@ -512,7 +512,7 @@ would run.
 
 LocalStack retired its free Community edition in **March 2026** — and ECS was never in the free image anyway. I listed `localstack/services/` at tags v1.4.0, v2.3.2, v3.8.1 and v4.0.0: **no `ecs`, no `elbv2`, no Cloud Map at any of them.**
 
-So this uses **Ministack** (MIT, free). Its ECS is 3,563 lines that really launch containers, and it also emulates ECR, Cloud Map, Secrets Manager and Bedrock.
+So this uses **Ministack** (MIT, free). Its ECS is 3,563 lines that really launch containers, and it also emulates ECR, Cloud Map, Secrets Manager and SSM.
 
 <!--
 Somebody always asks whether you need the emulator to develop. No - and reaching
@@ -851,7 +851,7 @@ live.
 3. **gRPC is for a typed contract, not for streaming.** Measured across 14 projects, and Dropbox says so themselves. Your first service will be 90% unary and that is correct.
 4. **Storage decides what can scale**, not traffic. Baked → scale freely. Writable → stay at one. Nothing → scale easiest.
 5. **One module set, two providers.** If "local" and "production" are different Terraform code, you are testing something you will never deploy.
-6. **Swap at the boundary, never with an `if`.** Database driver, LLM provider, REST-vs-gRPC — one interface, one env var, **no `if local` branch anywhere in the codebase**.
+6. **Swap at the boundary, never with an `if`.** Database driver, load-balancing policy, REST-vs-gRPC — one interface, one env var, **no `if local` branch anywhere in the codebase**.
 7. **The emulator buys a feedback loop, not confidence.** Deploy before you present.
 
 <!--
@@ -863,7 +863,7 @@ Number two is the bug that will cost somebody in this room a day.
 
 Number six is the one I became most opinionated about while building this. Several
 places in the codebase choose between a local and a cloud implementation - the
-database driver, the LLM, the Bedrock endpoint. None of them has a conditional.
+database driver, the load-balancing policy, the OTLP endpoint. None of them has a conditional.
 They each have an interface and an environment variable. That discipline is what
 makes "test locally, deploy to cloud" true rather than aspirational.
 -->

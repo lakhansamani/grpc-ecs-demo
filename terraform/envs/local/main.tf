@@ -18,6 +18,13 @@ variable "product_desired_count" {
   default = 1
 }
 
+# `-var lb_policy=pick_first` redeploys orderd with the bug, so the
+# load-balancing segment has a "before" to show. See ../../stack/main.tf.
+variable "lb_policy" {
+  type    = string
+  default = "round_robin"
+}
+
 module "stack" {
   source = "../../stack"
 
@@ -35,10 +42,11 @@ module "stack" {
   user_desired_count    = var.user_desired_count
   product_desired_count = var.product_desired_count
   order_desired_count   = var.order_desired_count
+  lb_policy             = var.lb_policy
   gateway_desired_count = 1
 
   # jaeger from compose.yaml, reachable because Ministack places task
-  # containers on the ecom-local network (DOCKER_NETWORK).
+  # containers on the ecom-infra network (DOCKER_NETWORK).
   otlp_endpoint = "jaeger:4317"
 
   # Ministack cannot create Cloud Map services through Terraform: it wants a

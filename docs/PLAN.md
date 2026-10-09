@@ -597,7 +597,7 @@ grpc-go **v1.84.0** binary and Terraform **1.14.5** / AWS provider **6.67.0**:
 | 2 | ECS starts a real container from a `FARGATE` + `awsvpc` + `ARM64` task def | ✅ `ministack-ecs-<task>-<ctr>` running, task `RUNNING` |
 | 3 | gRPC reachable, reflection + `grpc.health.v1` | ✅ `{"status":"SERVING"}` |
 | 4 | `rds` module → Postgres an ECS task can reach | ✅ real `postgres:16-alpine`, PostgreSQL 16.14 aarch64 |
-| 5 | Task can reach `jaeger:4317` | ✅ via `DOCKER_NETWORK=ecom-local` |
+| 5 | Task can reach `jaeger:4317` | ✅ via `DOCKER_NETWORK=ecom-infra` |
 | 6 | Cloud Map DNS between tasks | ❌ natively — ✅ with a 1-line shim (below) |
 | 7 | Bedrock `Converse` | ✅ returns a mock reply + token usage |
 
@@ -605,7 +605,7 @@ Three findings that change the build, all of which would have cost stage time:
 
 1. **`awsvpc` means no host port binding** — correct AWS behaviour, and it means you **cannot
    `grpcurl` a task from the Mac host**. The demo client must run as a container on the task
-   network (`docker run --network ecom-local ...`). Build `cmd/demo-client` as a container from
+   network (`docker run --network ecom-infra ...`). Build `cmd/demo-client` as a container from
    day one; do not plan on calling tasks from the host shell.
 2. **Do not publish the RDS port range on the ministack container.** Doing so cost 20 minutes:
    `CreateDBInstance` fails with `Bind for 0.0.0.0:15432 failed: port is already allocated`, and
@@ -646,7 +646,7 @@ limit, merchant category) decides; `internal/llm` wraps Bedrock behind an interf
 
 `cmd/demo-client` — a small CLI that registers, logs in, then fires `Authorize` calls: one approved,
 one declined with a streamed-in-text explanation, and a burst to show p99 under load. It must run as
-a container (`docker run --network ecom-local`) because `awsvpc` tasks have no host port — see
+a container (`docker run --network ecom-infra`) because `awsvpc` tasks have no host port — see
 Step 0 finding 1. Pair it with `--rate` so you can drive load for the §7.1 demo.
 
 **Day 3 — Terraform (must have)**

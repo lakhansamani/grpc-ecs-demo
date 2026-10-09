@@ -42,7 +42,7 @@ resource "aws_ecs_cluster_capacity_providers" "this" {
   }
 }
 
-# Cloud Map private DNS namespace: this is what turns "identityd" into a
+# Cloud Map private DNS namespace: this is what turns "userd" into a
 # resolvable hostname inside the VPC. Service discovery is, underneath, just
 # DNS - which is exactly why the local emulator can be stood in for with
 # Docker network aliases.

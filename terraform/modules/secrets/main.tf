@@ -1,7 +1,7 @@
 # The JWT signing secret.
 #
 # This is the concrete reason the demo needs Secrets Manager rather than a
-# hand-wave: identityd runs as THREE tasks, and if they do not all hold the
+# hand-wave: userd runs as THREE tasks, and if they do not all hold the
 # same secret then a token minted by one fails verification on another. The
 # demo would break intermittently and look exactly like a load-balancing bug.
 #
@@ -32,7 +32,7 @@ resource "random_password" "jwt" {
 
 resource "aws_secretsmanager_secret" "jwt" {
   name                    = var.name
-  description             = "HS256 signing secret shared by all identityd tasks"
+  description             = "HS256 signing secret shared by all userd tasks"
   recovery_window_in_days = 0 # destroy immediately, so re-applying a demo works
   tags                    = var.tags
 }
