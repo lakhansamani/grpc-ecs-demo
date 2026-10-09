@@ -27,6 +27,19 @@ it, because the load-balancing bug is connection-level, not stream-level.
 
 ## Quick start
 
+**You do not need the emulator to develop.** Fastest loop first — two terminals,
+no Docker, no AWS:
+
+```sh
+make dev-seed        # once
+make dev-identityd   # terminal 1 — :50051
+make dev-paymentd    # terminal 2 — :50052
+make dev-smoke       # terminal 3
+```
+
+That exercises both services and the real gRPC hop between them. Restart is
+about two seconds. Reach for the emulator when you need ECS itself:
+
 ```sh
 make test          # 7 packages, fully offline
 make local-up      # the AWS emulator + jaeger

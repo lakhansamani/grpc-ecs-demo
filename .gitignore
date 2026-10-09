@@ -8,3 +8,4 @@
 data/
 *.db
 clients/node/node_modules/
+data/

@@ -21,6 +21,50 @@ from a run that worked, not reconstructed.
 | ALB / gRPC target group | ❌ | needs an HTTPS listener + ACM; above the cut line |
 | `healthStatus`, `LaunchType` in the API | ⚠️ | emulator returns UNKNOWN / None even though the task def requests FARGATE |
 
+## Four loops — use the cheapest one that catches your bug
+
+You do **not** need the emulator to develop. Most of the time you should not run it.
+
+| Loop | Command | Restart | Catches |
+|---|---|---|---|
+| **1. `go run`** | `make dev-identityd` + `make dev-paymentd` | ~2s | business logic, rules, validation, auth, the contract |
+| **2. docker build** | `docker build -f build/Dockerfile.*` | ~30s | CGO creeping in, file ownership, CA bundle, architecture |
+| **3. emulator** | `make local-up && make tf-local-apply` | ~60s | task definitions, env wiring, IAM, secret resolution, Terraform |
+| **4. real AWS** | `terraform -chdir=terraform/envs/aws apply` | ~2min | everything the emulator does not model |
+
+### Loop 1 in full — no Docker, no emulator
+
+Three terminals. This is where most of the work happens.
+
+```sh
+make dev-seed        # once: creates ./data/identity.db with the demo users
+
+# terminal 1
+make dev-identityd   # :50051, sqlite at ./data/identity.db
+
+# terminal 2
+make dev-paymentd    # :50052, talks to localhost:50051
+
+# terminal 3
+make dev-smoke       # or grpcurl / Postman against localhost directly
+```
+
+Verified 2026-10-09:
+
+```
+login ok
+authorize -> DECISION_APPROVED
+explain   -> Declined: ₹45000.00 exceeds your per-transaction limit of ₹25000.00.
+```
+
+Why this works without any AWS at all: the only AWS-shaped dependencies are the
+database (SQLite, a local file) and the explanation provider (the `template`
+default, which needs no network). `make dev-clean` removes `./data`.
+
+**What loop 1 does NOT exercise:** task definitions, Cloud Map, Secrets Manager
+injection, the distroless image, `awsvpc` networking, graceful shutdown under a
+real SIGTERM from ECS. That is what loop 3 is for.
+
 ## Prerequisites
 
 ```sh
