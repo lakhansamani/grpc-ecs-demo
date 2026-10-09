@@ -90,6 +90,23 @@ grpc.KeepaliveParams(keepalive.ServerParameters{
 })
 ```
 
+## What each service stores
+
+Three storage shapes, one Dockerfile each — because the shape is the
+interesting part, not the service name.
+
+| Service | Storage | Dockerfile | Tasks | Why |
+|---|---|---|---|---|
+| `userd` | SQLite, **baked into the image** at build time | `Dockerfile.seeded` | 3 | every task ships an identical file, so all reads agree and it scales |
+| `productsd` | SQLite + **FTS5 search index**, baked in | `Dockerfile.seeded` | 3 | same, and the index is built by the seeder so nothing is indexed at boot |
+| `orderd` | SQLite, **empty and writable**, on the task filesystem | `Dockerfile.stateful` | **1** | it writes, so N tasks would mean N divergent databases |
+| `gatewayd` | **nothing at all** | `Dockerfile.stateless` | 3 | no database, no `/data`, no `DB_DRIVER` — pure translation |
+
+So `orderd` very much does use SQLite; it is the only service that *writes* to
+one. The difference between it and the other two is **baked vs. empty**, not
+present vs. absent. And `gatewayd` is the only one with no database — which is
+also why it is the easiest to scale and the right thing to put an ALB in front of.
+
 ## Deliberate decisions
 
 Each of these is a trade-off, not an accident. `SPEC.md` has the reasoning.

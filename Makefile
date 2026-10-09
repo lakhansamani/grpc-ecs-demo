@@ -144,7 +144,10 @@ dev-smoke:
 dev-clean:
 	rm -rf $(DEV_DATA)
 
-# ---- loop 2: images. One Dockerfile per shape, not per service. ----
+# ---- loop 2: images. One Dockerfile per STORAGE SHAPE, not per service. ----
+# seeded   = database baked in at build time  (userd, productsd)
+# stateful = empty writable database         (orderd)
+# stateless= no database at all              (gatewayd)
 images:
 	docker build --platform linux/arm64 -f build/Dockerfile.seeded \
 	  --build-arg SERVICE=userd --build-arg SEED_FLAG=-user-db --build-arg DB_FILE=user.db \
@@ -152,9 +155,9 @@ images:
 	docker build --platform linux/arm64 -f build/Dockerfile.seeded \
 	  --build-arg SERVICE=productsd --build-arg SEED_FLAG=-product-db --build-arg DB_FILE=product.db \
 	  -t productsd:0.1.0 -t localhost:4566/productsd:0.1.0 .
-	docker build --platform linux/arm64 -f build/Dockerfile.service \
+	docker build --platform linux/arm64 -f build/Dockerfile.stateful \
 	  --build-arg SERVICE=orderd -t orderd:0.1.0 -t localhost:4566/orderd:0.1.0 .
-	docker build --platform linux/arm64 -f build/Dockerfile.service \
+	docker build --platform linux/arm64 -f build/Dockerfile.stateless \
 	  --build-arg SERVICE=gatewayd -t gatewayd:0.1.0 -t localhost:4566/gatewayd:0.1.0 .
 	@docker images --format '{{.Repository}}:{{.Tag}}\t{{.Size}}' | grep -E '^(userd|productsd|orderd|gatewayd):0.1.0'
 

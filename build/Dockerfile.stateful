@@ -1,5 +1,8 @@
-# For services that start with no data: orderd (empty writable database) and
-# gatewayd (no database at all).
+# For a service that WRITES: orderd.
+#
+# Its SQLite database starts empty and lives on the task's own filesystem, so
+# it dies with the task. That is deliberate and it is the demo's closing
+# lesson - kill the task and the orders are gone. One env var moves it to RDS.
 #
 # syntax=docker/dockerfile:1
 FROM golang:1.27-alpine AS build
