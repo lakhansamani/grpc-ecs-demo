@@ -18,9 +18,13 @@ llm-up:
 	docker compose exec ollama ollama pull llama3.2:1b
 	docker compose restart ministack
 
+# Always re-alias after an apply: new task containers, new container ids, so
+# the previous aliases are gone with the old containers.
 tf-local-apply:
 	$(TF) init -upgrade
 	$(TF) apply -auto-approve
+	@sleep 12
+	@$(MAKE) --no-print-directory dns
 
 tf-local-destroy:
 	$(TF) destroy -auto-approve
@@ -90,3 +94,15 @@ proto-breaking:
 
 ts-demo:
 	cd clients/node && npm install && npm run demo
+
+# awsvpc tasks have no host port, so publish one via a relay on the task
+# network. This is the local stand-in for SSM port forwarding on AWS - needed
+# because Ministack does not emulate ssmmessages.
+# Depends on dns: terraform replaces task containers on every deploy, and a
+# replaced container has no alias, so forwarding would resolve nothing.
+forward: dns
+	@bash scripts/forward.sh
+
+forward-stop:
+	@docker rm -f forward-identityd forward-paymentd >/dev/null 2>&1 || true
+	@echo "forwarders stopped"
