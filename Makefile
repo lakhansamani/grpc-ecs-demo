@@ -143,3 +143,26 @@ dev-smoke:
 
 dev-clean:
 	rm -rf $(DEV_DATA)
+
+# ---- loop 2: images. One Dockerfile per shape, not per service. ----
+images:
+	docker build --platform linux/arm64 -f build/Dockerfile.seeded \
+	  --build-arg SERVICE=userd --build-arg SEED_FLAG=-user-db --build-arg DB_FILE=user.db \
+	  -t userd:0.1.0 -t localhost:4566/userd:0.1.0 .
+	docker build --platform linux/arm64 -f build/Dockerfile.seeded \
+	  --build-arg SERVICE=productsd --build-arg SEED_FLAG=-product-db --build-arg DB_FILE=product.db \
+	  -t productsd:0.1.0 -t localhost:4566/productsd:0.1.0 .
+	docker build --platform linux/arm64 -f build/Dockerfile.service \
+	  --build-arg SERVICE=orderd -t orderd:0.1.0 -t localhost:4566/orderd:0.1.0 .
+	docker build --platform linux/arm64 -f build/Dockerfile.service \
+	  --build-arg SERVICE=gatewayd -t gatewayd:0.1.0 -t localhost:4566/gatewayd:0.1.0 .
+	@docker images --format '{{.Repository}}:{{.Tag}}\t{{.Size}}' | grep -E '^(userd|productsd|orderd|gatewayd):0.1.0'
+
+dev-gatewayd:
+	USER_ADDR="127.0.0.1:50051" PRODUCT_ADDR="127.0.0.1:50053" ORDER_ADDR="127.0.0.1:50052" \
+	HTTP_ADDR=":8080" METRICS_ADDR=":9094" \
+	go run ./cmd/gatewayd
+
+# Prove REST works, and that the internal-only RPC is NOT exposed.
+dev-rest:
+	@bash scripts/rest-smoke.sh

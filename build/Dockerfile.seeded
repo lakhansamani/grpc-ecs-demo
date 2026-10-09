@@ -1,0 +1,45 @@
+# For services whose SQLite database is baked in at build time: userd and
+# productsd. Every task ships a byte-identical file, which is what lets a
+# service with an embedded database scale horizontally.
+#
+# Build with:
+#   docker build -f build/Dockerfile.seeded --build-arg SERVICE=userd \
+#     --build-arg SEED_FLAG=-user-db --build-arg DB_FILE=user.db ...
+#
+# syntax=docker/dockerfile:1
+ARG SERVICE
+FROM golang:1.27-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG SERVICE
+ARG TARGETARCH
+ARG VERSION=dev
+# CGO off: the SQLite driver is pure Go, which is why a static distroless
+# image is possible at all - and why FTS5 search works without a C toolchain.
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-arm64} \
+    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/app ./cmd/${SERVICE}
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-arm64} \
+    go build -trimpath -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck
+
+FROM golang:1.27-alpine AS seed
+WORKDIR /src
+ARG SEED_FLAG
+ARG DB_FILE
+COPY --from=build /go/pkg/mod /go/pkg/mod
+COPY . .
+RUN mkdir -p /data && CGO_ENABLED=0 go run ./cmd/seed ${SEED_FLAG} "file:/data/${DB_FILE}"
+# 65532 is distroless' nonroot uid:gid. The DIRECTORY must be writable too,
+# not just the file: SQLite creates -wal and -shm siblings next to it.
+RUN chown -R 65532:65532 /data && chmod 0755 /data && chmod 0644 /data/${DB_FILE}
+
+FROM gcr.io/distroless/static-debian12:nonroot
+ARG DB_FILE
+COPY --from=build /out/app /app
+COPY --from=build /out/healthcheck /healthcheck
+COPY --from=seed --chown=65532:65532 /data /data
+USER nonroot:nonroot
+ENV DB_DRIVER=sqlite
+ENV DB_URL=file:/data/${DB_FILE}
+ENTRYPOINT ["/app"]

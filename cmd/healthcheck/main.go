@@ -6,13 +6,18 @@
 //
 // Used as the ECS task-definition container healthCheck:
 //
-//	["CMD", "/healthcheck", "-addr", "localhost:50051", "-service", "identityd"]
+//	["CMD", "/healthcheck", "-addr", "localhost:50051", "-service", "userd"]
+//
+// gatewayd serves HTTP rather than gRPC, so it uses -http instead:
+//
+//	["CMD", "/healthcheck", "-http", "http://localhost:8080/healthz"]
 package main
 
 import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
@@ -22,16 +27,40 @@ import (
 )
 
 func main() {
+	httpURL := flag.String("http", "", "probe this HTTP URL instead of gRPC (for gatewayd)")
 	addr := flag.String("addr", "localhost:50051", "gRPC address to probe")
 	service := flag.String("service", "", "service name registered with the health server")
 	timeout := flag.Duration("timeout", 2*time.Second, "probe timeout")
 	flag.Parse()
+
+	if *httpURL != "" {
+		if err := probeHTTP(*httpURL, *timeout); err != nil {
+			fmt.Fprintln(os.Stderr, "unhealthy:", err)
+			os.Exit(1)
+		}
+		fmt.Println("SERVING")
+		return
+	}
 
 	if err := probe(*addr, *service, *timeout); err != nil {
 		fmt.Fprintln(os.Stderr, "unhealthy:", err)
 		os.Exit(1)
 	}
 	fmt.Println("SERVING")
+}
+
+// probeHTTP is for gatewayd, whose health endpoint is plain HTTP.
+func probeHTTP(url string, timeout time.Duration) error {
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Get(url)
+	if err != nil {
+		return fmt.Errorf("get %s: %w", url, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func probe(addr, service string, timeout time.Duration) error {
