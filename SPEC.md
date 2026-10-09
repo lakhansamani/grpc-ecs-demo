@@ -175,9 +175,14 @@ makes `SearchProducts` real rather than a `LIKE` query.
 
 ### 5.3 EFS is ruled out, on SQLite's own advice ✅
 
-SQLite's official position on network filesystems: *"SQLite relies on exclusive locks for write
-operations, and those have been known to operate incorrectly for some network filesystems. This has
-led to database corruption."* — and *"Rely upon it at your (and your customers') peril."*
+SQLite's own documentation, verbatim (`sqlite.org/whentouse.html`, verified 2026-10-09) ✅:
+
+> "SQLite will work over a network filesystem, but because of the latency associated with most
+> network filesystems, performance will not be great. Also, **file locking logic is buggy in many
+> network filesystem implementations** (on both Unix and Windows). If file locking does not work
+> correctly, two or more clients might try to modify the same part of the same database at the same
+> time, **resulting in corruption**. Because this problem results from bugs in the underlying
+> filesystem implementation, **there is nothing SQLite can do to prevent it.**"
 
 Not a cost decision, a correctness one. The database lives on the task's own filesystem.
 
@@ -380,7 +385,8 @@ holds without an asterisk.
   counts say nothing about task load.
 
   **Measured at three `userd` tasks** ✅: `pick_first` put **120 of 120** `VerifyToken` calls on one
-  task; `round_robin` gave **39 / 40 / 41**. `-var lb_policy=pick_first` redeploys `orderd` with the
+  task; `round_robin` gave **40 / 40 / 40** (measured as a Prometheus delta; repeat runs land at
+  39–41 per task). `-var lb_policy=pick_first` redeploys `orderd` with the
   bug, so this is shown live rather than described. The toggle disables **both** halves on purpose,
   because half the fix looks like it works and does not.
 - **9.3 Health checks** at three layers: `grpc.health.v1`, container healthCheck, target group.
@@ -546,10 +552,16 @@ Bugs this deployment caught that no local `go test` would have:
    `grpcclient.Warm`, which connects and waits for `Ready` before serving. Now 20/20 cold ✅.
 7. **Prometheus was never actually scraping** — see §5.4a. Two independent causes, both silent.
 8. **Local boot order.** Task containers start before `make dns` can attach them to the alias
-   network, so `orderd`'s upstream `Warm` fails and its first RPCs return
-   `Unavailable: lookup userd.ecom.local ... server misbehaving` until the grpc DNS resolver retries.
-   It self-heals within seconds; it is an artifact of the alias shim, not of the services, and on
-   AWS Cloud Map registers the task before it is reachable anyway. **Re-run the command.**
+   network, so `orderd` fails to resolve `userd.ecom.local` and its gRPC client caches that failure
+   with a resolver backoff. The first `make demo` after an apply then failed with
+   `Unavailable: user service unavailable`. An artifact of the alias shim, not of the services — on
+   AWS, Cloud Map registers a task before anything dials it.
+
+   Fixed by `scripts/wait-ready.sh`, which `tf-local-apply` and `smoke.sh` both call. The probe has
+   to exercise the **real hop**: checking that `userd.ecom.local` resolves from a fresh container
+   passes while `orderd` is still in backoff, so it logs in at `userd` and then calls an `orderd`
+   RPC that authenticates. Verified ✅: cold `destroy` → `apply` → `make demo` now passes first
+   time, no retry.
 
 Lesson for the talk, worth saying out loud: items 2, 4, 6 and 7 were only findable by actually
 running it. Neither unit tests nor `terraform validate` would have surfaced them.

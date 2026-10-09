@@ -18,7 +18,29 @@ if [ "$NETWORK" = "host" ]; then
 else
   g() { docker run --rm --network "$NETWORK" fullstorydev/grpcurl:latest -plaintext "$@"; }
 fi
-j() { python3 -c "import sys,json;d=json.load(sys.stdin);print($1)"; }
+# Fail with a sentence, not a JSONDecodeError traceback. An empty stdin here
+# almost always means grpcurl could not reach the service, and a stack trace
+# from json.load buries that on a projector.
+j() {
+  python3 -c "
+import sys, json
+raw = sys.stdin.read().strip()
+if not raw:
+    sys.stderr.write('   !! no response from the service (see the grpcurl error above)\n')
+    sys.exit(1)
+try:
+    d = json.loads(raw)
+except json.JSONDecodeError:
+    sys.stderr.write('   !! unexpected non-JSON response:\n' + raw[:400] + '\n')
+    sys.exit(1)
+print($1)"
+}
+
+# Shared with `make wait-ready`. Terraform replaces task containers on every
+# apply, so a fresh orderd can still be in DNS backoff when the demo starts.
+USER_ADDR="$USER_ADDR" ORDER_ADDR="$ORDER_ADDR" DEMO_NETWORK="$NETWORK" \
+  DEMO_EMAIL="$EMAIL" DEMO_PASSWORD="$PASSWORD" \
+  bash "$(dirname "$0")/wait-ready.sh"
 
 STAMP=$(date +%s)
 

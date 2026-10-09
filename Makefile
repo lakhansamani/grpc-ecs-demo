@@ -8,7 +8,7 @@ TF    := terraform -chdir=terraform/envs/local
 LOCAL_AWS := AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1 \
              aws --endpoint-url http://localhost:4566
 
-.PHONY: local-up local-down tf-local-apply tf-local-destroy dns demo demo-load \
+.PHONY: local-up local-down tf-local-apply tf-local-destroy dns demo demo-load wait-ready \
         scale test ps ps-aws forward forward-stop images api-coverage show-guard \
         proto proto-breaking ts-demo
 
@@ -28,6 +28,12 @@ tf-local-apply:
 	$(TF) apply -auto-approve
 	@sleep 12
 	@$(MAKE) --no-print-directory dns
+	@$(MAKE) --no-print-directory wait-ready
+
+# Blocks until orderd can actually reach userd and productsd. See the script -
+# the probe must exercise the real hop, not just check that DNS resolves.
+wait-ready:
+	@bash scripts/wait-ready.sh
 
 tf-local-destroy:
 	$(TF) destroy -auto-approve

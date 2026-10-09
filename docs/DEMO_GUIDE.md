@@ -541,7 +541,7 @@ terraform destroy
 | Tasks crash-loop right after deploy | check the logs; an OTel schema mismatch does this and is invisible without an OTLP endpoint | `docker logs <task container>` |
 | Intermittent auth failures at >1 task | a `Register`ed user exists on one task only | use a seeded user |
 | First request after a deploy fails | `grpc.NewClient` is lazy | already fixed by `grpcclient.Warm` |
-| Right after `tf-local-apply`: `Unavailable ... lookup userd.ecom.local ... server misbehaving` | tasks boot before `make dns` can attach them to the alias network, so the upstream warm-up fails | harmless, self-heals in seconds — **just re-run the command**. An artifact of the local alias shim; on AWS Cloud Map handles ordering |
+| Right after `tf-local-apply`: `Unavailable ... user service unavailable` | tasks boot before `make dns` can attach them to the alias network, so `orderd`'s gRPC client caches a DNS failure and sits in backoff | **already fixed** — `tf-local-apply` now ends with `make wait-ready`, which probes the real `orderd → userd` hop and blocks until it works. Run `make wait-ready` by hand if you ever see it |
 | AWS: `account is currently blocked` | Fargate **vCPU quota is 0** in that region | check `aws service-quotas`, request an increase, or pick a region that has quota |
 | AWS: `Unable to assume the service linked role` | fresh account, IAM still propagating | retry the apply |
 | Prometheus shows 0 targets | it runs as `nobody` and cannot read the Docker socket | already fixed with `user: root` in `compose.yaml`; check `docker logs prometheus` for `permission denied` |
