@@ -110,6 +110,7 @@ show-guard:
 proto:
 	buf lint
 	buf generate
+	buf generate --template buf.gen.ts.yaml --include-imports
 
 # Refuses to generate if a change would break existing clients.
 proto-breaking:

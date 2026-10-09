@@ -1,10 +1,17 @@
 # grpc-ecs-demo — Specification
 
 **Purpose:** demo repo for the talk *"Running Go gRPC Services on ECS: From LocalStack to Production Cloud"*
-**Speaker:** Lakhan Samani · AWS Community Day Vadodara · week of 2026-10-06
-**Status:** spec for review. **No application code written yet.** Nothing here is built until this is approved.
+**Speaker:** Lakhan Samani · AWS Community Day Vadodara · October 2026
+**Status:** **built and verified.** Deployed to a real AWS account on 2026-10-09 and torn down; the
+local path was re-run cold on 2026-10-09. Evidence in §13.
 
-Every factual claim marked ✅ was verified by running it on 2026-10-06/07, not recalled. Evidence in §14.
+Claims marked ✅ were verified by running them, not recalled.
+
+> **Scope of this document.** This is the specification for what the repo *is*. For how to run it
+> see [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md); for what each AWS component does see
+> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). [`docs/PLAN.md`](docs/PLAN.md) is the design-phase
+> research trail and is **superseded by this file wherever they disagree** — it still describes a
+> two-service payments example with RDS, which is not what was built.
 
 ---
 
@@ -12,7 +19,7 @@ Every factual claim marked ✅ was verified by running it on 2026-10-06/07, not 
 
 Teach a room of AWS practitioners how to take a Go gRPC microservice from `localhost:50051` to
 Fargate, using **one set of Terraform modules** that applies to a local emulator and to real AWS.
-The payments domain is a vehicle; the lessons are gRPC-on-ECS lessons.
+The e-commerce domain is a vehicle; the lessons are gRPC-on-ECS lessons.
 
 Three things the audience should leave able to do:
 
@@ -22,204 +29,140 @@ Three things the audience should leave able to do:
 
 ## 2. Non-goals
 
-No Kubernetes. No card network or PSP integration. No capture or settlement. No ledger. No vector
-DB. No RAG. No streaming in the core build (§5.4). No third service. No real money, no real cards,
-no PII.
+No Kubernetes. No payment processing. No real money and no PII. No streaming in the core build
+(§4.4). No ALB (§11). No vector DB, no RAG, **no LLM** — an order rejection carries a reason enum,
+so there is nothing for a model to phrase.
 
 ---
 
 ## 3. Architecture
 
-Two services, **all RPCs unary**, one real network hop between them.
+Four services, **all RPCs unary**, two real network hops on the write path.
 
 ```
-                    ┌───────────────────────────────────────────────────┐
- demo-client ─────> │  paymentd  ──────> SQLite (task-local, ephemeral) │
-  Authorize         │     │                                             │
-  (unary)           │     ├──gRPC────> identityd ──> SQLite (baked-in)  │
-                    │     │             VerifyToken                     │
-                    │     └──────────> explain: template (Bedrock opt-in)│
-                    └───────────────────────────────────────────────────┘
-      both ──OTLP──> Jaeger (local) / ADOT→X-Ray (AWS)
-      both ──:909x/metrics──> Prometheus
+  browser / Postman ──REST──> gatewayd ──gRPC──┬──> userd ──────> SQLite (baked into the image)
+                              (generated,      │
+                               not written)    ├──> productsd ──> SQLite + FTS5 (baked in)
+                                               │
+                                               └──> orderd ─────> SQLite (task-local, writable)
+                                                      │
+       grpcurl / Postman ──gRPC──────────────────────>┤
+                                                      ├──gRPC──> userd.VerifyToken
+                                                      └──gRPC──> productsd.CheckAvailability
+
+        all ──OTLP──> Jaeger (local) / ADOT→X-Ray (AWS)
+        all ──:909x/metrics──> Prometheus
 ```
 
-### 3.1 `identityd` — stateless, **scaled to 3 tasks**
+**Why three services and not two.** During a sale, browsing rises far more than buying, and the two
+workloads want opposite things: the read path is huge, spiky and safe to copy; the write path is
+small and must not be copied. One application cannot answer that, because scaling for the browsing
+also scales the part that writes orders. **Scale the reads, not the writes** — that sentence is why
+the service boundary falls where it does, and every later decision follows from it.
 
-Port of the existing `userd`. This is the service used for the load-balancing demo, because its
-read paths are identical on every task.
+### 3.1 `userd` — stateless, the one that scales
 
-| RPC | Notes |
-|---|---|
-| `Register` | writes — see §6.4 for the honest caveat |
-| `Login` | read; verifies bcrypt hash, issues HS256 JWT |
-| `VerifyToken` | read; was `Me()`, renamed to say what it does |
+Accounts and tokens. Called by `gatewayd` **and** by `orderd`, which makes it the busiest hop.
 
-### 3.2 `paymentd` — **1 task**, holds writable state
-
-Port of the existing `orderd`. Issuer-side: it *makes* the approve/decline decision.
-
-| RPC | Notes |
-|---|---|
-| `Authorize` | the hot path; fans out to `identityd.VerifyToken`, then rules, then persist |
-| `GetTransaction` | ownership-checked read |
-| `ListTransactions` | paginated read |
-| `ExplainDecision` | rules already decided; Bedrock only phrases it |
-
-### 3.3 What `Authorize` means
-
-Card payments have three steps people conflate:
-
-| Step | What happens | Money moves? |
+| RPC | REST | Notes |
 |---|---|---|
-| **Authorization** | issuer checks validity, funds, fraud; places a **hold**; approve/decline | No |
-| Capture | merchant says "take it" | Yes |
-| Settlement | batch transfer between banks | Already moved |
+| `Register` | `POST /v1/users` | writes — see §5.3 for the honest caveat |
+| `Login` | `POST /v1/sessions` | read; verifies a bcrypt hash, issues an HS256 JWT |
+| `VerifyToken` | `GET /v1/users/me` | read; token travels in metadata, not the body |
 
-`Authorize` is **step 1 only**, from the **issuer** side. There is no gateway/PSP call anywhere.
-Deliberate: it keeps the demo offline, and it keeps the latency budget *ours*, which §11.2 depends
-on — an external PSP call would dominate the latency and hide the lesson.
+### 3.2 `productsd` — stateless, read-only, FTS5 search
+
+| RPC | REST | Notes |
+|---|---|---|
+| `ListProducts` | `GET /v1/products` | paginated, optional category filter |
+| `GetProduct` | `GET /v1/products/{id}` | |
+| `SearchProducts` | `GET /v1/products:search` | SQLite **FTS5** full-text index, built by the seeder |
+| `CheckAvailability` | **none, deliberately** | internal: prices and stock for a cart |
+
+### 3.3 `orderd` — **1 task**, holds writable state
+
+| RPC | REST | Notes |
+|---|---|---|
+| `CreateOrder` | `POST /v1/orders` | two outbound hops, then persists |
+| `GetOrder` | `GET /v1/orders/{id}` | ownership-checked read |
+| `ListOrders` | `GET /v1/orders` | paginated; authenticates, so it is what the load demo drives |
+
+### 3.4 `gatewayd` — REST in, gRPC out, stores nothing
+
+`grpc-gateway` generated from the same protos. Not hand-written, and that is the point: the REST
+surface is a **side effect of the contract**, so it cannot drift from it.
+
+### 3.5 Two contract decisions worth a slide each
+
+**`CreateOrderRequest` carries no price.** A client sends product ids and quantities; `orderd` asks
+`productsd` what things cost and computes the total from the catalogue. A client must never be able
+to ask "is this price real?" and then submit a different number.
+
+```protobuf
+message RequestedItem { string product_id = 1; int32 quantity = 2; }
+```
+
+**`CheckAvailability` has no `google.api.http` option**, so it is reachable over gRPC and returns
+**404 over REST** ✅. Four lines of annotation are the whole difference between an internal and a
+public API — a far better demonstration of the gateway than exposing everything.
+
+A rejection is **not an error**: `CreateOrder` returns `OK` with
+`ORDER_STATUS_REJECTED` plus a `RejectionReason` enum. Reserving gRPC error codes for
+*transport and auth* failures keeps business outcomes out of the status code, where clients would
+have to parse strings.
 
 ---
 
-## 4. Proto contracts
+## 4. Decisions already settled
 
-Package-per-service, versioned by directory. Generated code **committed**, so a clone builds
-without `buf`.
-
-```protobuf
-// proto/identity/v1/identity.proto
-syntax = "proto3";
-package identity.v1;
-option go_package = "github.com/lakhansamani/grpc-ecs-demo/gen/go/identity/v1;identityv1";
-
-service IdentityService {
-  rpc Register    (RegisterRequest)    returns (RegisterResponse);
-  rpc Login       (LoginRequest)       returns (LoginResponse);
-  rpc VerifyToken (VerifyTokenRequest) returns (VerifyTokenResponse);
-}
-
-message User { string id = 1; string name = 2; string email = 3; }
-
-message RegisterRequest  { string name = 1; string email = 2; string password = 3; }
-message RegisterResponse { string user_id = 1; }
-message LoginRequest     { string email = 1; string password = 2; }
-message LoginResponse    { string token = 1; int64 expires_at = 2; }
-// Token travels in gRPC metadata ("authorization: Bearer <jwt>"), not in the body.
-message VerifyTokenRequest  {}
-message VerifyTokenResponse { User user = 1; }
-```
-
-```protobuf
-// proto/payment/v1/payment.proto
-syntax = "proto3";
-package payment.v1;
-option go_package = "github.com/lakhansamani/grpc-ecs-demo/gen/go/payment/v1;paymentv1";
-
-service PaymentService {
-  rpc Authorize        (AuthorizeRequest)        returns (AuthorizeResponse);
-  rpc GetTransaction   (GetTransactionRequest)   returns (GetTransactionResponse);
-  rpc ListTransactions (ListTransactionsRequest) returns (ListTransactionsResponse);
-  rpc ExplainDecision  (ExplainDecisionRequest)  returns (ExplainDecisionResponse);
-}
-
-enum Decision {
-  DECISION_UNSPECIFIED = 0;
-  DECISION_APPROVED    = 1;
-  DECISION_DECLINED    = 2;
-}
-
-enum DeclineReason {
-  DECLINE_REASON_UNSPECIFIED      = 0;
-  DECLINE_REASON_LIMIT_EXCEEDED   = 1;
-  DECLINE_REASON_VELOCITY         = 2;
-  DECLINE_REASON_MERCHANT_BLOCKED = 3;
-  DECLINE_REASON_INSUFFICIENT     = 4;
-}
-
-message Transaction {
-  string   id                = 1;
-  string   user_id           = 2;
-  int64    amount_minor      = 3;  // paise. NEVER float for money.
-  string   currency          = 4;  // ISO-4217, "INR"
-  string   merchant_id       = 5;
-  string   merchant_category = 6;  // MCC
-  Decision decision          = 7;
-  DeclineReason decline_reason = 8;
-  int64    created_at        = 9;  // unix millis
-}
-
-message AuthorizeRequest {
-  int64  amount_minor      = 1;
-  string currency          = 2;
-  string merchant_id       = 3;
-  string merchant_category = 4;
-  string idempotency_key   = 5;  // retries must not double-authorize
-}
-message AuthorizeResponse { Transaction transaction = 1; }
-
-message GetTransactionRequest   { string id = 1; }
-message GetTransactionResponse  { Transaction transaction = 1; }
-message ListTransactionsRequest { int32 page_size = 1; string page_token = 2; }
-message ListTransactionsResponse { repeated Transaction transactions = 1; string next_page_token = 2; }
-message ExplainDecisionRequest  { string transaction_id = 1; }
-message ExplainDecisionResponse { string explanation = 1; string model_id = 2; }
-```
-
-**Deliberate choices:** `int64` minor units for money, never `double` (the current `orderd` uses
-`double unit_price` — a defect). Enums for decisions so the contract is self-documenting.
-`idempotency_key` because any payment API without one is wrong. Codegen keeps
-`require_unimplemented_servers` **on** (the current repo disables it, losing a compile-time check).
-
----
-
-## 5. Decisions already settled
-
-### 5.1 Local emulator: Ministack, not LocalStack ✅
+### 4.1 Local emulator: Ministack, not LocalStack ✅
 
 LocalStack retired its free Community edition on 2026-03-23. ECS/ECR/ELB/Cloud Map were **never**
 in the free image (verified by listing `localstack/services/` at tags v1.4.0, v2.3.2, v3.8.1,
 v4.0.0 — no `ecs`, no `elbv2`, no `servicediscovery` at any of them). A Hobby account does not help:
-ECS, ECR, ALB, RDS and Bedrock are all excluded, and even paid Base lacks Cloud Map and Bedrock.
+ECS, ECR, ALB and RDS are all excluded, and even paid Base lacks Cloud Map.
 
 **Ministack** (`ministackorg/ministack`, MIT) emulates ECS with real Docker containers, plus ECR,
-ALB, Cloud Map, Secrets Manager, SSM and Bedrock — free. §14 has the verification run.
+ALB, Cloud Map, Secrets Manager and SSM — free. §13 has the verification runs.
 
-### 5.2 One Go module, one new repo
+### 4.2 One Go module, one new repo
 
 The four existing repos (`ecom-grpc-apis`, `-userd`, `-orderd`, `ecom-k8s`) are separately published
-with consumed tags and "blog series" READMEs. They stay untouched. This is a **new** repo, a
+with consumed tags and "blog series" READMEs. They stay untouched. This is a **new** repo and a
 **single** Go module — so `git clone && go build ./...` works with no `go.work` and no `replace`,
-and the two binaries cannot drift onto different contract versions.
+and the services cannot drift onto different contract versions (defect #12, §8).
 
-### 5.3 Domain: BFSI payment authorization
+### 4.3 Domain: e-commerce, chosen for the scaling asymmetry
 
-Chosen over ride hailing, trading, voice AI and e-commerce. Scored on *technical necessity* (§11.0,
-§11.2) rather than relatability.
+Chosen over BFSI payments, ride hailing, trading and voice AI. The earlier payments example was
+rejected as **too complex to explain in the time available**: it needed authorization-vs-capture-vs-
+settlement framing, issuer-vs-acquirer framing, and MCC/velocity jargon before the ECS lesson could
+start. E-commerce needs one sentence — *browsing scales, ordering must not* — and that sentence is
+itself the architecture. Scored on *technical necessity*, not relatability.
 
-### 5.4 No streaming in the core build
+### 4.4 No streaming in the core build
 
-Streaming is the minority in real gRPC projects (§14.3: Temporal 121 RPCs / 0 streaming; OTLP 1
-unary RPC). More importantly, **every** §11 lesson survives unary — the sticky-connection bug is
-connection-level, not stream-level. One optional server-streaming RPC sits above the cut line as a
-visual only.
+Streaming is the minority in real gRPC projects (§13.5: Temporal 121 RPCs / 0 streaming; OTLP 1
+unary RPC). More importantly, **every** §9 lesson survives unary — the sticky-connection bug is
+connection-level, not stream-level.
 
 ---
 
-## 6. Data: SQLite for the demo — RDS in production
+## 5. Data: SQLite for the demo — RDS in production
 
-**Framing for the talk: say plainly that RDS is the right answer and SQLite is a
-conference-demo shortcut.** The `rds` module stays in the repo, unapplied, and
-`DB_DRIVER=postgres` is the whole switch.
+**Framing for the talk: say plainly that RDS is the right answer and SQLite is a conference-demo
+shortcut.** The application is already driver-agnostic; `DB_DRIVER=postgres` plus a DSN in `DB_URL`
+is the whole switch (§5.5). There is **no RDS Terraform module in this repo** — writing one is the
+easy half, and leaving it out keeps the apply fast.
 
-### 6.1 Why the shortcut
+### 5.1 Why the shortcut
 
 RDS is the slowest and most expensive part of the demo: ~5–10 min to create on AWS, ~80s on
-Ministack ✅, plus a subnet group, a security group rule, and ~$12–15/mo if left running. Dropping it
-takes the AWS apply from ~10 minutes to ~2, which is the single biggest stage-risk reduction
+Ministack ✅, plus a subnet group, a security-group rule, and ~$12–15/mo if left running. Dropping it
+takes the AWS apply from ~10 minutes to **~2** ✅, which is the single biggest stage-risk reduction
 available. It also deletes a whole class of "is the DB reachable" failure on conference wifi.
 
-### 6.2 Driver: pure Go, mandatory ✅
+### 5.2 Driver: pure Go, mandatory ✅
 
 | Driver | Backend | CGO | Verdict |
 |---|---|---|---|
@@ -227,161 +170,158 @@ available. It also deletes a whole class of "is the DB reachable" failure on con
 | `github.com/glebarez/sqlite` v1.11.0 | `modernc.org/sqlite` v1.60.1 | none | ✅ **use this** |
 
 Verified: static ARM64 ELF built with `CGO_ENABLED=0`, running SQLite 3.53.4 under GORM with
-`TranslateError: true`. Evidence in §14.2.
+`TranslateError: true`. Evidence in §13.4. **FTS5 works in the pure-Go driver** ✅, which is what
+makes `SearchProducts` real rather than a `LIKE` query.
 
-### 6.3 EFS is ruled out, on SQLite's own advice ✅
+### 5.3 EFS is ruled out, on SQLite's own advice ✅
 
 SQLite's official position on network filesystems: *"SQLite relies on exclusive locks for write
 operations, and those have been known to operate incorrectly for some network filesystems. This has
 led to database corruption."* — and *"Rely upon it at your (and your customers') peril."*
 
-So no EFS. The database lives on the task's own filesystem.
+Not a cost decision, a correctness one. The database lives on the task's own filesystem.
 
-### 6.4 Consequences — stated plainly, then used as a teaching point
+### 5.4 Three storage shapes — one Dockerfile each
 
 Fargate task storage is **ephemeral and dies with the task**, and N tasks means N independent
-databases. That is not hidden; it shapes the design:
+databases. That is not hidden; it shapes the design. **There is one Dockerfile per storage shape,
+not per service**, because the shape is the interesting part:
 
-| Service | DB | Tasks | Consequence |
-|---|---|---|---|
-| `identityd` | **baked into the image at build time**, seeded with demo users | **3** | every task has a byte-identical DB, so all *read* paths (`Login`, `VerifyToken`) behave identically → **the load-balancing demo works perfectly**. `Register` writes only to the task that served it, and is explicitly non-persistent. |
+| Service | Storage | Dockerfile | Tasks | Consequence |
+|---|---|---|---|---|
+| `userd` | **baked into the image at build time**, seeded | `Dockerfile.seeded` | **3** | every task has a byte-identical DB, so all *read* paths behave identically → **the load-balancing demo works perfectly** |
+| `productsd` | baked in, plus the FTS5 index | `Dockerfile.seeded` | **3** | same; the index is built by the seeder, so nothing is indexed at boot |
+| `orderd` | task-local, **writable** | `Dockerfile.stateful` | **1** | orders persist for the life of the task and vanish when it is replaced |
+| `gatewayd` | **none at all** | `Dockerfile.stateless` | 1–N | no database, no `/data`, no `DB_DRIVER` — pure translation |
 
-> **Demo-flow rule, do not violate:** anything run at `identityd` N>1 must authenticate as a
-> **seeded** user. A user created by `Register` exists on exactly one task, so after scale-out two
-> of three tasks will fail `VerifyToken` for them — which looks exactly like the load-balancing fix
-> not working, and would wreck the §11.2 segment. `make demo-load` therefore always logs in as a
-> seeded user. `Register` is demonstrated only at N=1, or shown deliberately at N=3 as "watch this
-> *not* survive scale-out" — a fine lesson, but announce which one you are doing.
-| `paymentd` | task-local, writable | **1** | authorizations persist for the life of the task and vanish when it is replaced |
+> **Demo-flow rule, do not violate:** anything run at `userd` N>1 must authenticate as a **seeded**
+> user. A user created by `Register` exists on exactly one task, so after scale-out two of three
+> tasks will fail `VerifyToken` for them — which looks **exactly** like the load-balancing fix not
+> working, and would wreck the §9.2 segment. `scripts/load.sh` therefore always logs in as a seeded
+> user. `Register` is demonstrated only at N=1, or shown deliberately at N=3 as "watch this *not*
+> survive scale-out" — a fine lesson, but announce which one you are doing.
 
-**This is a feature, not a compromise.** The closing beat of the talk:
+Terraform **refuses** to scale the writer, so the rule is enforced rather than remembered ✅:
 
-> "Kill the `paymentd` task — your authorizations are gone. *This* is what people mean when they say
-> don't keep state in the task. One env var moves it to RDS."
+```hcl
+validation {
+  condition     = var.order_desired_count == 1
+  error_message = "orderd keeps its database on the task filesystem, so N tasks would mean N divergent databases. Scale userd or productsd instead."
+}
+```
 
-The `rds` Terraform module is written and kept, **not applied by default**, so flipping
-`DB_DRIVER=postgres` is a 30-second finale if time allows.
+`make show-guard` shows the refusal on screen. **This is a feature, not a compromise.** The closing
+beat:
 
-### 6.4a Two implementation details that will bite otherwise
+> "Kill the `orderd` task — your orders are gone. *This* is what people mean when they say don't
+> keep state in the task. One env var moves it to Postgres."
+
+### 5.4a Three implementation details that will bite otherwise
 
 - **File ownership.** The runtime image is `distroless/static:nonroot`. The baked SQLite file must be
-  `COPY --chown=nonroot:nonroot`, and its **directory** must be writable — SQLite needs to create
+  `COPY --chown=65532:65532`, and its **directory** must be writable — SQLite needs to create
   `-journal`/`-wal` siblings, so a writable file in a read-only directory still fails with
   `attempt to write a readonly database`.
-- **Prometheus needs service discovery**, not static targets: task IPs are assigned at runtime.
-  Locally use `docker_sd_configs` (the Docker socket is already mounted); on AWS use
-  `dns_sd_configs` against `identityd.ecom.local`. Acceptance criterion 4 depends on this.
+- **Prometheus needs service discovery**, not static targets: task IPs are assigned at runtime and
+  change on every deploy. Locally `docker_sd_configs`; on AWS `dns_sd_configs` against
+  `userd.ecom.local`. Acceptance criterion 4 depends on this. Two non-obvious parts, both found by
+  running it ✅ — the image runs as `nobody` and **cannot read the Docker socket** (discovery fails
+  with `permission denied` while the container looks perfectly healthy, so `user: root` is
+  required), and `awsvpc` task containers **expose no ports**, so the metrics port cannot be
+  discovered and must be supplied per service.
+- **`TranslateError: true`** on the GORM config, or `ErrDuplicatedKey` is never returned and the
+  idempotency branch is dead code (defect #1, §8).
 
-### 6.8 Explanations without Bedrock access — the design
-
-The deployed environment has **no Bedrock access**, so the explanation path must work with nothing
-behind it. `internal/payment/explain` therefore ships three pieces:
-
-| Piece | Role |
-|---|---|
-| `Template` | Pure Go, no network, no credentials, deterministic. **The default, including on ECS.** |
-| `Bedrock` | The real AWS SDK `bedrockruntime` Converse client. Opt-in via `LLM_PROVIDER=bedrock`. |
-| `Fallback` | Wraps any provider; on error *or* empty output it degrades to `Template`. Always applied. |
-
-**Why the template is not a cop-out.** For a card decline, a deterministic template is arguably the
-*correct* production choice: auditable, instant, free, translatable, and structurally incapable of
-inventing a reason the rules did not give. The honest line for the stage is:
-
-> "The rules decide. The model only phrases it. And for a regulated decline reason, a template does
-> that better than a model — so that is what ships. Here is the interface, so swapping it is a
-> config change, not a rewrite."
-
-**How the Bedrock path is mocked when it is enabled.** No custom endpoint code exists. The AWS SDK
-already honours `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` (its generic `AWS_ENDPOINT_URL_<SDK_ID>`
-mechanism, verified ✅), so the deployment alone decides where the client points:
-
-| Environment | `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` | Result |
-|---|---|---|
-| local | `http://ministack:4566` | Ministack's emulated Converse (mock text, or real prose via the Ollama proxy) |
-| ECS, no access | a stub endpoint, or simply leave `LLM_PROVIDER=template` | template text |
-| real Bedrock | unset | real model via the task role |
-
-**This is the talk's thesis for the third time**: the same endpoint-override trick as Terraform's
-`endpoints` block and the same boundary discipline as the database driver. One env var, and
-**not a single `if local` branch anywhere in the codebase**. Verified by a test that stands a stub
-HTTP server in for Bedrock and asserts the SDK routes to it ✅.
-
-**Consequence for §11:** the "task IAM role instead of API keys" lesson now hangs on **Secrets
-Manager** (the shared `JWT_SECRET`, §6.6), not on Bedrock. That is a better example anyway, because
-it is load-bearing — get it wrong with 3 `identityd` tasks and the demo breaks.
-
-### 6.5 Driver abstraction
+### 5.5 Driver abstraction
 
 `DB_DRIVER` ∈ {`sqlite`, `postgres`} plus `DB_URL`. GORM supports both, so this is ~10 lines and one
-`switch`. It keeps the finale cheap and keeps the spec honest about the production answer.
+`switch` in [`internal/platform/store`](internal/platform/store). It keeps the spec honest about the
+production answer. The SQLite pool is capped at **one** connection, and WAL plus `busy_timeout`
+pragmas are set.
 
-### 6.6 The JWT-secret trap — must not be missed
+### 5.6 The JWT-secret trap — must not be missed
 
-With `identityd` on 3 tasks, **all three must share one `JWT_SECRET`**, or a token minted by task A
+With `userd` on 3 tasks, **all three must share one `JWT_SECRET`**, or a token minted by task A
 fails verification on task B and the demo breaks intermittently and confusingly. The secret comes
 from **Secrets Manager** (AWS) / Ministack Secrets Manager (local), injected via the task
 definition's `secrets` block — never baked into the image, never per-task. **Verified ✅: Ministack's
 ECS resolves `secrets[].valueFrom` against its Secrets Manager, so the local and AWS paths are
-identical here** — no emulator gap, and the Secrets Manager segment demos locally. This is the concrete
-motivation for the Secrets Manager section rather than a bolted-on aside.
+identical here** — no emulator gap, and the Secrets Manager segment demos locally. This is the
+concrete motivation for that segment rather than a bolted-on aside: get it wrong and the demo
+breaks.
 
-### 6.7 Schema
+### 5.7 Schema
 
-Migrations run at boot via GORM `AutoMigrate` with the **error checked** (the current repo discards
-it). Safe here because each task owns its own file — no concurrent-migration race, which is itself
-worth one sentence on stage.
+Migrations run at boot via GORM `AutoMigrate` with the **error checked** (the old repo discards it).
+Safe here because each task owns its own file — no concurrent-migration race, which is itself worth
+one sentence on stage.
 
 ```
 users:        id TEXT pk, name TEXT, email TEXT UNIQUE, password_hash TEXT, created_at INT
-transactions: id TEXT pk, user_id TEXT idx, amount_minor INT, currency TEXT,
-              merchant_id TEXT, merchant_category TEXT, decision INT, decline_reason INT,
+products:     id TEXT pk, title TEXT, description TEXT, category TEXT idx,
+              price_minor INT, currency TEXT, stock INT, created_at INT
+              + products_fts  (FTS5 virtual table over title/description)
+orders:       id TEXT pk, user_id TEXT idx, total_minor INT, currency TEXT,
+              status INT, rejection_reason INT,
               idempotency_key TEXT UNIQUE, created_at INT
+order_lines:  id pk, order_id TEXT fk ON DELETE CASCADE, product_id TEXT,
+              title TEXT, unit_price_minor INT, quantity INT
 ```
+
+`int64` **minor units** for money everywhere, never a float (the old `orderd` used
+`double unit_price` — defect #15). The idempotency key is namespaced per user by the service, and
+unique, so a retried request cannot place a second order; the service pre-checks **and** falls back
+to the stored row on `gorm.ErrDuplicatedKey`, because the pre-check alone loses a race.
 
 ---
 
-## 7. Repo layout
+## 6. Repo layout
 
 ```
 grpc-ecs-demo/
 ├── go.mod                      # ONE module
-├── buf.yaml  buf.gen.yaml
-├── proto/{identity,payment}/v1/*.proto
+├── buf.yaml  buf.gen.yaml      # four outputs from one source
+├── proto/{user,product,order}/v1/*.proto   # the only hand-written contract
 ├── gen/go/...                  # generated, committed
-├── cmd/
-│   ├── identityd/main.go
-│   ├── paymentd/main.go
-│   └── demo-client/main.go     # -mode=once | load
+├── gen/openapi/                # generated, committed
+├── clients/node/src/gen/       # generated TypeScript
+├── cmd/{userd,productsd,orderd,gatewayd,seed,healthcheck}/
 ├── internal/
-│   ├── identity/               # service + store
-│   ├── payment/                # service + store + rules + llm
+│   ├── user/  product/  order/           # service + store each
 │   └── platform/
 │       ├── grpcserver/         # server, health, graceful shutdown, interceptors
+│       ├── grpcclient/         # THE load-balancing fix
 │       ├── observability/      # OTel + Prometheus
-│       ├── db/                 # driver switch, migrate
+│       ├── store/             # driver switch, pragmas, migrate
 │       └── config/             # env parsing, reports ALL missing vars at once
-├── build/
-│   ├── Dockerfile.identityd    # includes `seed` step that bakes the SQLite file
-│   └── Dockerfile.paymentd
+├── build/Dockerfile.{seeded,stateful,stateless}   # one per STORAGE SHAPE
 ├── terraform/
-│   ├── modules/{network,ecr,ecs-cluster,ecs-service,secrets,observability}
-│   │                              # + alb, rds — both ABOVE the cut line (§15.1)
-│   └── envs/{local,aws}/
-├── compose.yaml                # ministack + redis + jaeger + prometheus [+ ollama profile]
+│   ├── modules/{network,ecr,ecs-cluster,ecs-service,secrets,iam}
+│   ├── stack/                  # the whole deployment, shared VERBATIM
+│   └── envs/{local,aws}/       # differ ONLY in provider.tf
+├── docker/prometheus.yml
+├── compose.yaml                # ministack + redis + jaeger + prometheus
+├── scripts/{smoke,rest-smoke,api-coverage,load,ps,forward}.sh
 ├── Makefile
-└── docs/DEMO.md                # §12 runbook
+├── PRESENTATION.md
+└── docs/{ARCHITECTURE,DEMO_GUIDE,DEPLOY_AWS,AWS_PERMISSIONS,DEMO_ACCESS,PLAN}.md
 ```
+
+**One proto, four outputs** — `protocolbuffers/go`, `grpc/go`, `grpc-ecosystem/gateway`,
+`grpc-ecosystem/openapiv2` and `bufbuild/es` (TypeScript). Generated code is **committed**, so a
+clone builds without `buf` installed.
 
 ---
 
-## 8. Toolchain — versions verified against the module proxy / registry ✅
+## 7. Toolchain — versions verified against the module proxy / registry ✅
 
-| Component | Version | vs. current repo |
+| Component | Version | vs. the old repo |
 |---|---|---|
 | Go | **1.27.1** | was 1.23.1 |
 | grpc-go | **v1.84.0** | was v1.71.0 |
 | protobuf-go | **v1.36.12** | was v1.36.5 |
 | protoc-gen-go-grpc | **v1.6.2** | raw protoc 27.3 |
+| grpc-gateway | **v2.31.0** | new |
 | golang-jwt | **v5.3.1** | was v3.2.2+incompatible (CVE-2020-26160) |
 | gorm | **v1.31.2** | was v1.25.12 |
 | sqlite driver | **glebarez/sqlite v1.11.0** → modernc v1.60.1 | new |
@@ -389,18 +329,19 @@ grpc-ecs-demo/
 | prometheus/client_golang | **v1.24.1** | v1.21.1 and v1.14.0 — drifted |
 | aws-sdk-go-v2 | **v1.47.1** | new |
 | Terraform / AWS provider | **1.14.5 / 6.67.0** | new |
+| @bufbuild/protoc-gen-es | **2.16.0** | new |
 | codegen | **buf** | raw `protoc` |
 | base image | pinned `distroless/static:nonroot`, `TARGETARCH` | `alpine:latest`, hardcoded amd64, root |
 
 Target **arm64/Graviton**: cheaper on Fargate and native on the speaker's M-series laptop (no QEMU).
 **Verified ✅ Fargate Spot supports ARM64** (GA since Oct 2024, Fargate platform version **1.4.0+**,
-all commercial regions, up to ~70% off). So `cpu_architecture = ARM64` + `FARGATE_SPOT` is a valid
-combination and the `ecs-service` module needs no per-service capacity-provider special-casing —
-the "byte-identical modules" claim holds without an asterisk.
+all commercial regions). So `cpu_architecture = ARM64` + `FARGATE_SPOT` is a valid combination and
+the `ecs-service` module needs no per-service special-casing — the "byte-identical modules" claim
+holds without an asterisk.
 
 ---
 
-## 9. Defects from the existing repo that this fixes
+## 8. Defects from the existing repo that this fixes
 
 | # | Where | Problem |
 |---|---|---|
@@ -422,76 +363,70 @@ the "byte-identical modules" claim holds without an asterisk.
 
 ---
 
-## 10. Local environment
+## 9. Talk content this repo must support
 
-`compose.yaml`: `ministack` (:4566) + `redis` + `jaeger` + `prometheus`, all on the `ecom-infra`
-Docker network, with `DOCKER_NETWORK=ecom-infra` so Ministack-launched ECS tasks join it. **No
-postgres service** — there is no RDS now, and SQLite lives inside the task.
-
-`ollama` is a compose **profile** (`make llm-up`): Ministack's `MINISTACK_BEDROCK_PROXY_URL`
-forwards Converse to any OpenAI-compatible endpoint and translates back, giving real LLM prose
-offline **through the real AWS SDK path**. If unreachable it falls back to the canned mock
-*silently* — the correct failure mode on stage. ✅
-
-Known local gaps, with the agreed workaround:
-
-| Gap | Workaround |
-|---|---|
-| Cloud Map stores registrations but serves **no DNS** ✅ | `make dns` adds Docker network aliases — service discovery *is* just DNS. Verified resolving. **Must alias every task, not one**: Docker's embedded DNS returns all A records for a shared alias, which is what makes the local §11.2 demo possible. |
-| `awsvpc` tasks have **no host port** ✅ | correct AWS behaviour; `demo-client` runs as a container on the task network |
-| ECS Service Connect / Envoy not emulated | that comparison is AWS-only |
-| Bedrock text is a deterministic mock | optional Ollama proxy above |
-
----
-
-## 11. Talk content this repo must support
-
-- **11.0 Why ECS, not Lambda.** Lambda runs no listening server; API Gateway REST strips gRPC
+- **9.0 Why ECS, not Lambda.** Lambda runs no listening server; API Gateway REST strips gRPC
   framing; and the ELB docs state it outright for gRPC target groups: *"The only supported target
   types are `instance` and `ip`. … You can't use Lambda functions as targets."* ✅ Needs no streaming.
-- **11.1 Service discovery:** Cloud Map DNS → the failure → the fix → Service Connect → ALB.
-- **11.2 The headline bug.** grpc-go defaults to **`pick_first`**: even when `dns:///` resolves 3
-  task IPs, one task takes 100% of traffic. Fix is two parts —
-  client `grpc.WithDefaultServiceConfig('{"loadBalancingConfig":[{"round_robin":{}}]}')`, and
-  server `keepalive.ServerParameters{MaxConnectionAge: 30s, MaxConnectionAgeGrace: 5s}` so clients
-  re-resolve after a scale-out. For ALB, set
+- **9.1 Service discovery:** Cloud Map DNS → the failure → the fix → Service Connect → ALB.
+- **9.2 The headline bug.** grpc-go defaults to **`pick_first`**: even when three tasks are healthy
+  and DNS returns three addresses, one task takes 100% of traffic. **Both halves are required** —
+  client `grpc.WithDefaultServiceConfig('{"loadBalancingConfig":[{"round_robin":{}}]}')` **and** a
+  `dns:///` target prefix (a bare `host:port` uses the **passthrough** resolver and yields exactly
+  one address, so `round_robin` has nothing to balance over), plus server
+  `keepalive.ServerParameters{MaxConnectionAge: 30s, MaxConnectionAgeGrace: 5s}` so clients
+  re-resolve after a scale-out. For an ALB, set
   `load_balancing.algorithm.type = least_outstanding_requests` — with multiplexed HTTP/2, connection
   counts say nothing about task load.
-- **11.3 Health checks** at three layers: `grpc.health.v1`, container healthCheck, target group.
-  ALB gRPC needs a custom health check method `/package.service/method` plus healthy status codes. ✅
-- **11.4 Graceful shutdown** wired to `stopTimeout` and deregistration delay.
-- **11.5 Observability**: Jaeger locally, ADOT → X-Ray on AWS.
-- **11.6 `buf breaking`** rejecting a renamed field — the strongest argument for Protobuf, and
+
+  **Measured at three `userd` tasks** ✅: `pick_first` put **120 of 120** `VerifyToken` calls on one
+  task; `round_robin` gave **39 / 40 / 41**. `-var lb_policy=pick_first` redeploys `orderd` with the
+  bug, so this is shown live rather than described. The toggle disables **both** halves on purpose,
+  because half the fix looks like it works and does not.
+- **9.3 Health checks** at three layers: `grpc.health.v1`, container healthCheck, target group.
+  ALB gRPC needs a custom health check method `/package.service/method` plus healthy status codes ✅.
+  The runtime image is distroless — no shell, no `curl`, no `grpc-health-probe` — so `/healthcheck`
+  is a small Go binary baked in, with an HTTP mode for `gatewayd` and a gRPC mode for the rest.
+- **9.4 Graceful shutdown** wired to `stopTimeout`. Order matters: flip the health service to
+  `NOT_SERVING` **first**, then a bounded `GracefulStop`, then `Stop()`. And `stopTimeout` (30s)
+  **must exceed** the app's own `SHUTDOWN_TIMEOUT` (15s), or ECS SIGKILLs mid-drain and the
+  graceful-shutdown work is wasted.
+- **9.5 Observability**: Jaeger locally, ADOT → X-Ray on AWS. One `CreateOrder` trace shows three
+  spans ✅.
+- **9.6 `buf breaking`** rejecting a renamed field — the strongest argument for Protobuf, and
   impossible to show with raw `protoc`.
-- **11.7 Stateless vs stateful on ECS** — §6.4, delivered by killing the `paymentd` task.
+- **9.7 Stateless vs stateful on ECS** — §5.4, delivered by killing the `orderd` task.
+- **9.8 One proto, two protocols.** `CheckAvailability` over gRPC works; over REST it is a 404 ✅.
 
 ### How the laptop reaches the AWS deployment
 
-ALB is blocked on ACM and sits above the cut line, so `make demo AWS=1` needs another path.
-**Decision: `paymentd` runs in a public subnet with `assign_public_ip = true` and a security group
-allowing :50052 from the speaker's IP only.** `identityd` stays private — only `paymentd` calls it,
-over Cloud Map. This also avoids a NAT Gateway (§ cost guardrails). The alternative, running
-`demo-client` as a one-off `run-task` in-VPC, is more faithful but gives no live terminal output,
-so it is the fallback if the venue IP is unpredictable.
+ALB is blocked on ACM and sits above the cut line, so the demo needs another path.
+**Decision: `gatewayd` runs in a public subnet with `assign_public_ip = true` and a security group
+allowing :8080 from the speaker's IP only.** `userd` and `productsd` stay private — only `orderd`
+calls them, over Cloud Map. This also avoids a NAT Gateway (§ cost guardrails). SSM port forwarding
+is the better option where it is available, because it needs no public IP and no inbound rule at
+all; see [`docs/DEMO_ACCESS.md`](docs/DEMO_ACCESS.md).
 
-### ⚠️ Blocker to resolve before the talk
-
-ALB gRPC target groups **require an HTTPS listener** ✅ → ACM certificate → a domain. Without one,
-cut external gRPC ingress and keep traffic internal. Needs an answer early, not on Friday.
+> **Check the egress IP at the venue** (`curl ifconfig.me`). The conference NAT is probably not the
+> IP allow-listed from home, and an **IPv6** address in a `cidr_ipv4` field fails the apply partway
+> through ✅ — caught in a plan, which is why the plan gets read.
 
 ### Cost guardrails
 
 **No NAT Gateway** (~$32/mo + data — the #1 demo-account bill killer): public subnets with
-`assign_public_ip`, or VPC endpoints for ECR/Secrets/Logs. Fargate Spot, `desired_count` 1 except
-`identityd`=3 during §11.2. `make tf-aws-destroy` before leaving the venue.
+`assign_public_ip`. For production the opposite is correct — private subnets plus VPC endpoints for
+`ecr.api`, `ecr.dkr`, `s3`, `logs` and `secretsmanager`, which is cheaper than NAT at this scale and
+keeps traffic off the internet. **Fargate has no free tier**; ARM64 in us-east-1 is $0.03238 per
+vCPU-hour + $0.00356 per GB-hour ≈ **1¢ per task-hour** at 0.25 vCPU / 0.5 GB. Container Insights
+off, log retention 1 day, `desired_count` 1 except `userd`=3 during §9.2. **`terraform destroy`
+before leaving the venue.**
 
 ---
 
-## 11.8 Proving it is really ECS (`make ps`)
+## 10. Proving it is really ECS (`make ps`)
 
 The audience's fair question is "how is that different from docker compose?"
-`scripts/ps.sh` answers it in seven escalating steps, and the last three are the
-convincing ones:
+`scripts/ps.sh` answers it in seven escalating steps, and the last four are the convincing ones:
 
 | # | Shows | Why it convinces |
 |---|---|---|
@@ -503,98 +438,63 @@ convincing ones:
 | 6 | `secrets[].valueFrom` is an ARN | the secret never entered git or the image |
 | 7 | login as each seeded user | the baked database is identical on every task |
 
-Step 4 is the one to linger on. Verified output:
+Step 4 is the one to linger on. Verified output ✅:
 
 ```
-Cluster  : arn:aws:ecs:us-east-1:000000000000:cluster/payments-local
-TaskARN  : arn:aws:ecs:us-east-1:000000000000:task/payments-local/6cd5fea5-...
-Family   : identityd rev 1
+Cluster  : arn:aws:ecs:us-east-1:000000000000:cluster/ecom-local
+TaskARN  : arn:aws:ecs:us-east-1:000000000000:task/ecom-local/90c7be3b-...
+Family   : userd rev 1
 AZ       : us-east-1a
 ```
 
-Step 5 is worth a sentence too: the AWS SDK picks those two variables up on its
-own. That is the whole "no API keys on ECS" story in one `docker inspect`.
-
-**Emulator fidelity — say this out loud, do not hope nobody reads the table.**
-`healthStatus` comes back `UNKNOWN` and `LaunchType` as `None`/`EC2`, because
-Ministack does not echo those back even though the task definition requests
-`FARGATE` and the service uses the FARGATE capacity provider. Real ECS reports
-`HEALTHY` and `FARGATE`. Naming the emulator's limits yourself is more credible
-than being caught by them, and it is precisely why the talk also deploys to AWS.
-
-## 12. Stage runbook
-
-```bash
-make local-up          # ministack + jaeger (+ make llm-up for real LLM text)
-make tf-local-apply    # terraform apply → ECS tasks on the emulator
-make dns               # Cloud Map alias shim
-make ps                # PROVE it is ECS: control plane, task metadata, task role
-make demo              # login → approved + declined authorize + explanation
-make ts-demo           # the SAME flow from TypeScript  ← polyglot segment
-make demo-load         # sustained Authorize; watch per-task metrics   ← §11.2
-make scale N=3         # identityd 1→3: show the failure, then the fix
-make tf-aws-plan       # same modules, no endpoints block              ← the money slide
-make demo AWS=1        # identical client, real Fargate, real Bedrock
-make tf-aws-destroy
-```
-
-### The TypeScript segment (~60 seconds, confirmed in scope)
-
-`clients/node` is generated by the **same `buf generate`** that produces the Go stubs — one extra
-plugin in `buf.gen.yaml`, nothing hand-written. It exists because "a typed contract with free
-polyglot codegen" is the reason real projects adopt gRPC (§14.3), and claiming that is weaker than
-showing it.
-
-What to say while `make ts-demo` runs:
-
-1. "Same `.proto`. I added one plugin. I wrote no types."
-2. `int64` → Go `int64`, TypeScript **`bigint`** — because a JS `number` cannot hold int64 safely.
-   The generator gets that right so you cannot silently truncate a timestamp. Hand-written clients
-   get this wrong constantly.
-3. Status codes survive the language boundary: `AlreadyExists`, `Unauthenticated`,
-   `InvalidArgument` — so the client branches on a code, not on a message string.
-4. The browser caveat, which sets up §11.0: this is **real gRPC over HTTP/2**, and it works because
-   Node can open an HTTP/2 connection and send trailers. A browser cannot — hence gRPC-Web and
-   Connect. One line (`createConnectTransport`) and the same generated types run in a browser. Not
-   one of the 14 surveyed projects exposes gRPC publicly.
-
-Verified output (2026-10-08):
-
-```
-approved     -> ₹1200.00 APPROVED
-idempotent   -> same transaction (replay=true)
-declined     -> ₹45000.00 DECLINED LIMIT_EXCEEDED
-explanation  -> "Declined: ₹45000.00 exceeds your per-transaction limit of ₹25000.00." [template]
-duplicate    -> AlreadyExists
-bad token    -> Unauthenticated
-```
-
-**Rules:** never `terraform apply` from scratch on stage — pre-provision and demo a *delta*. Pin
-every image tag. Pre-pull images the morning of. Keep a screen recording and a saved
-`terraform plan` as insurance.
+**Emulator fidelity — say this out loud, do not hope nobody reads the table.** `healthStatus` comes
+back `UNKNOWN` and `launchType` empty, because Ministack does not echo those back even though the
+task definition requests `FARGATE` and the service is created with `launch_type = FARGATE`. Real ECS
+reports `HEALTHY` and `FARGATE`. Naming the emulator's limits yourself is more credible than being
+caught by them, and it is precisely why the talk also deploys to AWS.
 
 ---
 
-## 13. Acceptance criteria
+## 11. What is deliberately NOT built
+
+| Missing | Why |
+|---|---|
+| **ALB** | a gRPC target group **requires an HTTPS listener** ✅ → ACM certificate → a domain. Above the cut line. Cloud Map covers the internal hops; `gatewayd` is the one thing an ALB belongs in front of, and that is a slide, not a demo |
+| **RDS** | §5.1. The application-side switch exists; the Terraform module does not |
+| **EFS** | §5.3 — corruption, not cost |
+| **NAT Gateway** | cost guardrails above |
+| **Container Insights** | costs money per metric; Prometheus and Jaeger cover the demo |
+| **Autoscaling policies** | `make scale N=3` is more honest on stage than waiting for a CloudWatch alarm |
+| **Streaming** | §4.4 |
+| **An LLM** | §2. The payments example needed prose for a decline reason; an order rejection is an enum |
+
+---
+
+## 12. Acceptance criteria
+
+All eight pass as of 2026-10-09 ✅.
 
 1. `git clone && go build ./...` succeeds on a clean machine with only Go 1.27 installed.
-2. `go test ./...` passes offline.
-3. `make local-up && make tf-local-apply && make dns && make demo` yields an approved **and** a
-   declined authorization, with the decline explained in prose.
-4. `make demo-load` (authenticating as a **seeded** user — see §6.4) with `identityd` at 3 tasks
-   shows traffic on **one** task before the fix and spread across all three after, visible in
-   Prometheus via service discovery. Requires `make dns` to have aliased **every** identityd task,
-   not just the first.
-5. Killing the `identityd` task mid-load drops **zero** in-flight RPCs (graceful shutdown works).
-6. `terraform plan` in `envs/aws` succeeds, and its module set is byte-identical to `envs/local`.
-7. One Jaeger trace shows `paymentd.Authorize` → `identityd.VerifyToken` as parent/child spans.
-8. `buf breaking` fails on a renamed proto field.
+2. `go test ./...` passes offline — **8 packages**, plus `go vet` clean and
+   `npm run typecheck` clean in `clients/node`.
+3. `make local-up && make images && make tf-local-apply && make demo` yields a confirmed order and
+   all three rejection reasons, end to end.
+4. `make demo-load` (authenticating as a **seeded** user — §5.4) with `userd` at 3 tasks shows
+   traffic on **one** task before the fix and spread across all three after, visible in Prometheus
+   per task. Requires `make dns` to have aliased **every** `userd` task, not just the first.
+5. Killing a `userd` task mid-load drops **zero** in-flight RPCs (graceful shutdown works).
+6. `terraform plan` in `envs/aws` succeeds, and its module set is byte-identical to `envs/local` —
+   `diff` of the two `provider.tf` files is the only difference.
+7. One Jaeger trace shows `orderd.CreateOrder` → `userd.VerifyToken` and →
+   `productsd.CheckAvailability` as child spans.
+8. `make api-coverage` reports **20/20**: all 10 RPCs, all 9 REST routes, and the negative assertion
+   that `CheckAvailability` is *not* exposed over REST.
 
 ---
 
-## 14. Verified evidence
+## 13. Verified evidence
 
-### 14.1 Ministack Step 0 spike — PASSED (2026-10-06)
+### 13.1 Ministack Step 0 spike — PASSED (2026-10-06)
 
 Distroless ARM64 Go 1.27 / grpc-go 1.84.0 binary, Terraform 1.14.5 / AWS provider 6.67.0:
 
@@ -603,65 +503,103 @@ Distroless ARM64 Go 1.27 / grpc-go 1.84.0 binary, Terraform 1.14.5 / AWS provide
 | ECR repo via Terraform + `docker push` | ✅ pushes to `localhost:4566/<repo>` |
 | ECS starts a real container from `FARGATE` + `awsvpc` + `ARM64` task def | ✅ task `RUNNING` |
 | gRPC reflection + `grpc.health.v1` | ✅ `{"status":"SERVING"}` |
-| RDS module → Postgres reachable from a task | ✅ PostgreSQL 16.14 (now unused — §6) |
+| RDS module → Postgres reachable from a task | ✅ PostgreSQL 16.14 (now unused — §5) |
 | Task → `jaeger:4317` | ✅ via `DOCKER_NETWORK` |
 | Cloud Map DNS between tasks | ❌ natively; ✅ via Docker-alias shim |
-| Bedrock `Converse` | ✅ mock reply + token usage |
 
 Gotcha found and fixed: publishing the RDS port range on the ministack container makes
 `CreateDBInstance` fail with `port is already allocated` and then silently report a dead endpoint.
 
-### 14.1b Terraform -> Ministack ECS, end to end — PASSED (2026-10-08)
+### 13.2 Terraform → Ministack ECS, end to end — PASSED (2026-10-08, re-run cold 2026-10-09)
 
-`terraform apply` in `envs/local` creates VPC, subnets, security group, ECR
-repos, ECS cluster with FARGATE + FARGATE_SPOT, Cloud Map namespace, log group,
-Secrets Manager secret, IAM roles, and both ECS services. Tasks start, and
-`scripts/smoke.sh` passes against them: approved, idempotent replay, over-limit
-decline with a rendered explanation, blocked-category decline, and an
-unauthenticated call rejected through the identityd hop.
+`terraform apply` in `envs/local` creates VPC, subnets, security group, ECR repos, ECS cluster with
+FARGATE + FARGATE_SPOT, Cloud Map namespace, log group, Secrets Manager secret, IAM roles, and all
+four ECS services. Tasks start, and `scripts/smoke.sh` passes against them. `make api-coverage`
+reports 20/20 **on a cold start** ✅, and `destroy` removed 36 resources leaving no `ecom` networks.
 
-**Secrets Manager injection works on the emulator.** identityd requires
-`JWT_SECRET` and refuses to start without it, so the task reaching SERVING is
-proof that `secrets[].valueFrom` resolved.
+**Secrets Manager injection works on the emulator.** `userd` requires `JWT_SECRET` and refuses to
+start without it, so the task reaching SERVING is proof that `secrets[].valueFrom` resolved.
 
-Four real bugs this deployment caught that no local run would have:
+Bugs this deployment caught that no local `go test` would have:
 
-1. **`count` cannot depend on a resource attribute.** `count = var.namespace_id
-   == "" ? 0 : 1` fails with "Invalid count argument" because the namespace does
-   not exist at plan time. Replaced with a statically-known
-   `enable_service_discovery` flag.
-2. **OTel semconv version mismatch crash-looped both tasks.**
-   `resource.Merge(resource.Default(), ...)` rejects a resource whose schema URL
-   differs from the SDK's, so importing `semconv/v1.37.0` against otel sdk
-   v1.47.0 (which uses v1.43.0) is fatal. **It is invisible locally**, because
-   with no `OTEL_EXPORTER_OTLP_ENDPOINT` the tracer short-circuits to a no-op and
-   never builds a resource. Fixed, and pinned by a regression test that passes an
-   endpoint.
-3. **Ministack cannot create Cloud Map services via Terraform.** Its
-   `CreateService` requires a top-level `NamespaceId`; the AWS provider sends it
-   nested in `DnsConfig`, which is what real AWS accepts. Confirmed by calling
-   both shapes directly. So `enable_service_discovery = false` locally and the
-   `make dns` alias shim stands in; `true` on AWS.
-4. **`docker ps` ORs multiple `--filter name=` values.** The first `make dns`
-   therefore aliased *paymentd's* container as `identityd.ecom.local` — a silent
-   misroute that would have broken the stage demo in a baffling way. Fixed with
-   one anchored regex filter, plus a force-disconnect pass, because
-   `docker network rm` fails while containers are attached and left stale
-   aliases behind.
+1. **`count` cannot depend on a resource attribute.** `count = var.namespace_id == "" ? 0 : 1` fails
+   with "Invalid count argument" because the namespace does not exist at plan time. Replaced with a
+   statically-known `enable_service_discovery` flag.
+2. **OTel semconv version mismatch crash-looped every task.** `resource.Merge(resource.Default(),
+   ...)` rejects a resource whose schema URL differs from the SDK's, so importing `semconv/v1.37.0`
+   against otel sdk v1.47.0 (which uses v1.43.0) is fatal. **It is invisible locally**, because with
+   no `OTEL_EXPORTER_OTLP_ENDPOINT` the tracer short-circuits to a no-op and never builds a
+   resource. Fixed, and pinned by a regression test that passes an endpoint.
+3. **Ministack cannot create Cloud Map services via Terraform.** Its `CreateService` requires a
+   top-level `NamespaceId`; the AWS provider sends it nested in `DnsConfig`, which is what real AWS
+   accepts. Confirmed by calling both shapes directly. So `enable_service_discovery = false` locally
+   and the `make dns` alias shim stands in; `true` on AWS.
+4. **`docker ps` ORs multiple `--filter name=` values.** The first `make dns` therefore aliased the
+   wrong container as `userd.ecom.local` — a silent misroute that would have broken the stage demo
+   in a baffling way. Fixed with one anchored regex filter, plus a force-disconnect pass, because
+   `docker network rm` fails while containers are attached and left stale aliases behind.
+5. **`capacity_provider_strategy` produced a perpetual diff** against the emulator, which does not
+   echo the strategy back; the provider then refuses with *"force_new_deployment should be true"*.
+   Spot is now opt-in and the default is plain `launch_type = "FARGATE"`.
+6. **`grpc.NewClient` is lazy**, so the first cold `api-coverage` run scored 10/20: the first RPC
+   pays for resolution and the handshake and fails fast if the upstream is not up yet. Fixed with
+   `grpcclient.Warm`, which connects and waits for `Ready` before serving. Now 20/20 cold ✅.
+7. **Prometheus was never actually scraping** — see §5.4a. Two independent causes, both silent.
+8. **Local boot order.** Task containers start before `make dns` can attach them to the alias
+   network, so `orderd`'s upstream `Warm` fails and its first RPCs return
+   `Unavailable: lookup userd.ecom.local ... server misbehaving` until the grpc DNS resolver retries.
+   It self-heals within seconds; it is an artifact of the alias shim, not of the services, and on
+   AWS Cloud Map registers the task before it is reachable anyway. **Re-run the command.**
 
-Lesson for the talk, worth saying out loud: items 2 and 4 were only findable by
-actually deploying. Neither unit tests nor `terraform validate` would have
-surfaced them.
+Lesson for the talk, worth saying out loud: items 2, 4, 6 and 7 were only findable by actually
+running it. Neither unit tests nor `terraform validate` would have surfaced them.
 
-### 14.2 SQLite pure-Go static build (2026-10-07)
+### 13.3 Real AWS — PASSED, then destroyed (2026-10-09)
+
+Account `272639014758`, **us-east-1**, ~2 minutes to apply.
+
+| Check | Result |
+|---|---|
+| All four tasks RUNNING on Fargate ARM64 | ✅ |
+| Full REST smoke through `gatewayd`'s public IP | ✅ `POST /v1/orders` → `CONFIRMED total=29999.0` |
+| `CheckAvailability` over REST | ✅ 404 |
+| `userd` scaled to 3 tasks | ✅ 3 Cloud Map A records across 2 AZs (`10.0.1.91, 10.0.0.172, 10.0.0.135`) |
+| `terraform destroy` | ✅ 45 resources; verified 0 clusters, repos, namespaces, secrets, VPCs, ENIs and IAM roles remaining in us-east-1 **and** ap-south-1 |
+
+Three things real AWS caught that the emulator could not:
+
+1. **ap-south-1 had a Fargate vCPU quota of zero**, and ECS reported only *"your account is
+   currently blocked"* — not a quota error. Quota 30 was available in us-east-1, us-west-2 and
+   eu-central-1, so the region moved. **Check `service-quotas` before choosing a region.**
+2. **The ECS service-linked role had not propagated.** The first apply failed with *"Unable to
+   assume the service linked role"* although the role already existed. A retry fixed it.
+3. **THE BIG ONE — an empty `health_check_custom_config {}` block broke Cloud Map DNS.** It looks
+   like the clean way to silence a deprecation warning on `failure_threshold`, but it makes the
+   provider send *no* custom health config at all. Cloud Map then never accepts ECS's health
+   reports, every instance stays `AWS_INIT_HEALTH_STATUS=UNHEALTHY`, unhealthy instances are
+   **excluded from DNS answers**, and clients fail with `code 14: "no children to pick from"` —
+   while all four tasks, all four Cloud Map services and VPC DNS all look healthy in the console.
+   AWS forces the value to `1` regardless, so the deprecation warning is cosmetic but **the block is
+   required**. The fix also needed the ECS services drained to 0 first, because `DeleteService`
+   returns `ResourceInUse`. There is a prominent comment on it in
+   `terraform/modules/ecs-service/main.tf`; **do not "clean it up".**
+
+### 13.4 SQLite pure-Go static build (2026-10-07)
+
+Run in a throwaway package that is **not** in the repo — the point was to settle the driver choice
+before any service code was written (§5.2):
 
 ```
-$ CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags probe ./internal/sqlitecheck
+$ CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags probe ./sqlitecheck
 $ file probe → ELF 64-bit LSB executable, ARM aarch64, statically linked
 $ go run  → OK pure-go sqlite=3.53.4 row="probe"
 ```
 
-### 14.3 When gRPC makes sense — measured from 14 projects' real `.proto` files
+The standing proof is now the build itself: `build/Dockerfile.seeded` builds with `CGO_ENABLED=0`
+onto `distroless/static:nonroot`, which simply would not run if the driver needed CGO. FTS5 is
+exercised by `make demo`, whose first step is a `SearchProducts` call ✅.
+
+### 13.5 When gRPC makes sense — measured from 14 projects' real `.proto` files
 
 Temporal 121 RPCs / **0** streaming · Milvus 154 / 2 · TiKV 73 / 9 · Dapr 74 / 6 · k8s CRI 43 / 7 ·
 etcd 42 / 4 · Qdrant 30 / **0** · CockroachDB 28 / 10 · containerd 17 / **0** · Bazel RE 13 / 5 ·
@@ -669,27 +607,89 @@ Vitess 9 / 4 · Thanos 4 / 1 · **Envoy xDS 2 / 2 (100%)** · **OTLP 1 / 0**.
 
 Conclusion: gRPC is chosen for a **typed, versioned, polyglot contract on internal traffic**;
 streaming is a capability for specific cases (config push, watch, blob transfer). Not one of the 14
-is a public consumer API.
+is a public consumer API — which is the honest answer to "should our mobile app speak gRPC?".
+Protos in [`docs/evidence/`](docs/evidence).
+
+### 13.6 The TypeScript segment (~60 seconds)
+
+`clients/node` is generated by the **same protos** that produce the Go stubs — one extra plugin,
+nothing hand-written.
+
+> TypeScript codegen lives in a **separate template**, `buf.gen.ts.yaml`, run with
+> `--include-imports`. `protoc-gen-es` emits a real import for every proto dependency, so a proto
+> importing `google/api/annotations.proto` generates `import { file_google_api_annotations }` — and
+> that file only exists if imports are generated too. `--include-imports` is a CLI flag applying to
+> every plugin in a template, and generating googleapis into `gen/go` would collide with what
+> grpc-gateway already provides. Hence two templates; `make proto` runs both. The plugin also needs
+> `import_extension=js`, because the client is an ESM package on `moduleResolution: NodeNext` and
+> Node ESM requires explicit extensions on relative imports ✅. It exists because "a typed contract with free
+polyglot codegen" is the reason real projects adopt gRPC (§13.5), and claiming that is weaker than
+showing it.
+
+What to say while `make ts-demo` runs:
+
+1. "Same `.proto`. I added one plugin. I wrote no types."
+2. `int64` → Go `int64`, TypeScript **`bigint`** — because a JS `number` cannot hold int64 safely.
+   The generator gets that right so you cannot silently truncate a timestamp or a price. Hand-written
+   clients get this wrong constantly.
+3. Status codes survive the language boundary: `AlreadyExists`, `Unauthenticated`,
+   `InvalidArgument` — so the client branches on a code, not on a message string.
+4. The browser caveat, which sets up §9.0: this is **real gRPC over HTTP/2**, and it works because
+   Node can open an HTTP/2 connection and send trailers. A browser cannot — hence gRPC-Web, Connect,
+   and `gatewayd`. Not one of the 14 surveyed projects exposes gRPC publicly.
+
+Verified output (2026-10-09) ✅ — needs `make forward` first, since `awsvpc` tasks have no host port:
+
+```
+search       -> Wireless Noise Cancelling Headphones, Noise Cancelling Earbuds Ultra
+get          -> Wireless Noise Cancelling Headphones ₹29999.00
+logged in    -> expires 2026-10-10T13:49:51.722Z
+verified     -> demo@example.com
+ordered      -> CONFIRMED ₹29999.00 (1 line priced by productsd)
+idempotent   -> same order (replay=true)
+rejected     -> REJECTED OUT_OF_STOCK
+bad password -> Unauthenticated
+bad token    -> Unauthenticated
+empty cart   -> InvalidArgument
+```
 
 ---
 
-## 14.4 Note on `docs/PLAN.md`
+## 14. Stage rules
 
-That file is the working document from the design phase and is **superseded by this spec** wherever
-they disagree — in particular it still names RDS as the database and carries the pre-SQLite day
-plan. It is kept only for the research trail; `docs/evidence/` holds the 14 projects' protos.
+```bash
+make test              # 8 packages, offline
+make local-up          # ministack + jaeger + prometheus
+make images            # four ARM64 distroless images
+make tf-local-apply    # terraform apply → ECS tasks (auto-runs make dns)
+make ps                # PROVE it is ECS: control plane, task metadata, task role
+make demo              # browse → login → order → three rejections
+make dev-rest          # the same flow over REST
+make ts-demo           # the SAME flow from TypeScript   ← polyglot segment
+make forward           # publish ports for Postman
+make scale N=3         # userd 1→3
+make demo-load         # sustained load; watch per-task metrics  ← §9.2
+make show-guard        # terraform refusing to scale the writer
+make api-coverage      # 20/20
+```
+
+- **Pre-provision AWS.** Never run a cold `terraform apply` on stage; deploy the day before and
+  live-demo a *delta* — a scale-out, or killing a task.
+- **Pin every image tag** and pre-pull the morning of.
+- **Use a seeded user** once `userd` is at more than one task (§5.4).
+- **Keep a screen recording and a saved `terraform plan`** as insurance.
+- **`terraform destroy` before leaving the venue.**
 
 ---
 
-## 15. Open questions — need answers before/while building
+## 15. Resolved questions
 
-1. **Talk date.** The day plan assumes 5 working days. A Saturday talk leaves 3, which means cutting
-   to the floor: *both services on Ministack ECS via Terraform + one service on real Fargate*, with
-   ALB, Secrets, observability and §11.2 as stretch.
-2. **Domain + ACM cert** for the ALB gRPC listener — or agree now to cut external ingress.
-3. ~~Bedrock model access~~ — **RESOLVED 2026-10-08: there is no Bedrock access on the ECS
-   deployment.** See §6.8. The explanation provider defaults to `template` everywhere; the Bedrock
-   client stays in the repo as reference code and is reachable via an endpoint override. No IAM
-   permission, no model opt-in, no region constraint, no cost.
-4. **Repo name** — `grpc-ecs-demo` used throughout; one `git mv` + module rename to change.
-5. **Push to GitHub?** Public repo for the audience to clone, and under which account.
+| | Resolution |
+|---|---|
+| Domain | **e-commerce** (§4.3). Payments was built first and rejected as too complex to explain |
+| Database | **SQLite on the task**, three storage shapes (§5.4). RDS named as the production answer |
+| ALB / ACM / domain | **cut.** External ingress is `gatewayd` on a public IP restricted to one `/32`, or SSM port forwarding |
+| Bedrock / LLM | **removed entirely** (§2). The code existed, was imported by nothing, and is deleted |
+| Repo name | `grpc-ecs-demo`, module `github.com/lakhansamani/grpc-ecs-demo` |
+| Public repo | https://github.com/lakhansamani/grpc-ecs-demo |
+| Region | **us-east-1** — ap-south-1 had zero Fargate vCPU quota (§13.3) |

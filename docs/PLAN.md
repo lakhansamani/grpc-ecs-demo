@@ -1,5 +1,20 @@
-> **SUPERSEDED by `../SPEC.md`** wherever the two disagree. Kept for the research trail; it still
-> names RDS as the database and carries the pre-SQLite day plan.
+> # ⚠️ HISTORICAL — do not follow these instructions
+>
+> **This is the design-phase research trail, superseded by [`../SPEC.md`](../SPEC.md).** It is kept
+> because it records *how* the example was chosen, which is worth more than the plan itself.
+>
+> It describes **a different system from the one that was built**: two services named `identityd`
+> and `paymentd`, a BFSI card-authorization domain, RDS Postgres, and an LLM for decline
+> explanations. All four were later dropped — the payments domain needed
+> authorization-vs-capture-vs-settlement framing before the ECS lesson could even start, which was
+> too much to explain in the time available.
+>
+> **What was actually built:** `userd` + `productsd` + `orderd` + `gatewayd`, an e-commerce domain
+> chosen for its scaling asymmetry (browsing scales, ordering must not), SQLite on the task
+> filesystem, and no LLM at all.
+>
+> For anything you intend to run, use [`../SPEC.md`](../SPEC.md),
+> [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`DEMO_GUIDE.md`](DEMO_GUIDE.md).
 
 
 # Go gRPC on ECS — talk rebuild plan
@@ -7,7 +22,8 @@
 **Talk:** Running Go gRPC Services on ECS: From LocalStack to Production Cloud
 **Speaker:** Lakhan Samani · AWS Community Day Vadodara · week of 2026-10-06
 **Repo today:** `apis` + `userd` + `orderd` + `k8s` (kind) + `docker` (prom/alertmanager)
-**Target:** monorepo, `identityd` + `paymentd` (all unary), Terraform that runs locally *and* on AWS, no Kubernetes.
+**Target (as planned at the time):** monorepo, `identityd` + `paymentd` (all unary), Terraform that
+runs locally *and* on AWS, no Kubernetes. *Superseded — see the banner above.*
 
 ---
 

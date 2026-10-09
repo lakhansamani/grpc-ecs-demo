@@ -1,0 +1,22 @@
+# TypeScript codegen is a SEPARATE template, run with --include-imports.
+#
+# Why it cannot live in buf.gen.yaml: protoc-gen-es emits a real import for
+# every proto dependency, so a proto that imports google/api/annotations.proto
+# produces `import { file_google_api_annotations } from "..."` - and that file
+# only exists if imports are generated too. But --include-imports is a CLI flag
+# that applies to EVERY plugin in the template, and generating googleapis into
+# gen/go would collide with the descriptors grpc-gateway already provides.
+#
+# So: Go from buf.gen.yaml, TypeScript from here. `make proto` runs both.
+version: v2
+managed:
+  enabled: false
+plugins:
+  # import_extension=js because the client is an ESM package ("type": "module")
+  # on moduleResolution NodeNext, and Node ESM requires explicit file
+  # extensions on relative imports.
+  - remote: buf.build/bufbuild/es:v2.16.0
+    out: clients/node/src/gen
+    opt:
+      - target=ts
+      - import_extension=js

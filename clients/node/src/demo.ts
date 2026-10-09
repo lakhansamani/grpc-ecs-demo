@@ -1,39 +1,38 @@
 /**
- * TypeScript client for identityd + paymentd, generated from the SAME .proto
- * files that produced the Go server stubs. Nothing here was hand-written from
- * documentation: the types, field names and method signatures all come out of
- * `buf generate`.
+ * TypeScript client for userd + productsd + orderd, generated from the SAME
+ * .proto files that produced the Go server stubs. Nothing here was hand-written
+ * from documentation: the types, field names and method signatures all come out
+ * of `buf generate`.
  *
- * This is the gRPC argument that actually holds up in practice (SPEC.md 14.3):
+ * This is the gRPC argument that actually holds up in practice (SPEC.md 13.5):
  * one contract, N languages, no drift. Rename a field in the proto and this
  * file stops compiling.
  *
- *   npm run demo
- *   IDENTITY_URL=... PAYMENT_URL=... npm run demo
+ *   make forward && npm run demo
+ *   USER_URL=... PRODUCT_URL=... ORDER_URL=... npm run demo
  */
 import { createClient, Code, ConnectError } from "@connectrpc/connect";
 import { createGrpcTransport } from "@connectrpc/connect-node";
 
-import { IdentityService } from "./gen/identity/v1/identity_pb.js";
-import {
-  PaymentService,
-  Decision,
-  DeclineReason,
-} from "./gen/payment/v1/payment_pb.js";
+import { UserService } from "./gen/user/v1/user_pb.js";
+import { ProductService } from "./gen/product/v1/product_pb.js";
+import { OrderService, OrderStatus, RejectionReason } from "./gen/order/v1/order_pb.js";
 
-const identityUrl = process.env.IDENTITY_URL ?? "http://localhost:50151";
-const paymentUrl = process.env.PAYMENT_URL ?? "http://localhost:50152";
+const userUrl = process.env.USER_URL ?? "http://localhost:50051";
+const orderUrl = process.env.ORDER_URL ?? "http://localhost:50052";
+const productUrl = process.env.PRODUCT_URL ?? "http://localhost:50053";
 
 // Real gRPC over HTTP/2 - the same protocol the Go client speaks, not a REST shim.
 //
 // FOR THE TALK: this works because Node can open an HTTP/2 connection and send
-// trailers. A BROWSER cannot, which is why gRPC-Web and the Connect protocol
-// exist. Swap createGrpcTransport for createConnectTransport and these exact
-// generated types work in a browser instead.
-const identity = createClient(IdentityService, createGrpcTransport({ baseUrl: identityUrl }));
-const payments = createClient(PaymentService, createGrpcTransport({ baseUrl: paymentUrl }));
+// trailers. A BROWSER cannot, which is why gRPC-Web, the Connect protocol and
+// gatewayd exist. Swap createGrpcTransport for createConnectTransport and these
+// exact generated types work in a browser instead.
+const users = createClient(UserService, createGrpcTransport({ baseUrl: userUrl }));
+const products = createClient(ProductService, createGrpcTransport({ baseUrl: productUrl }));
+const orders = createClient(OrderService, createGrpcTransport({ baseUrl: orderUrl }));
 
-/** Minor units -> readable. amountMinor is a bigint: int64 does not fit safely in a JS number. */
+/** Minor units -> readable. priceMinor is a bigint: int64 does not fit safely in a JS number. */
 function rupees(minor: bigint): string {
   const sign = minor < 0n ? "-" : "";
   const abs = minor < 0n ? -minor : minor;
@@ -45,90 +44,93 @@ function codeOf(err: unknown): string {
 }
 
 async function main(): Promise<void> {
-  const email = `ts-${Date.now()}@example.com`;
-  const password = "supersecret";
+  console.log("--- productsd: the read path, no auth required ---");
 
-  console.log("--- identityd ---");
-  const registered = await identity.register({ name: "TypeScript Client", email, password });
-  console.log("registered   ->", registered.userId);
+  const found = await products.searchProducts({ query: "cancelling" });
+  console.log("search       ->", found.products.map((p) => p.title).join(", ") || "(none)");
 
-  const session = await identity.login({ email, password });
+  const listed = await products.listProducts({ category: "footwear", pageSize: 5 });
+  console.log("list         ->", listed.products.length, "in footwear");
+
+  const one = await products.getProduct({ id: "p-1001" });
+  console.log("get          ->", one.product?.title, rupees(one.product?.priceMinor ?? 0n));
+
+  console.log("--- userd: log in as a SEEDED user ---");
+  console.log("             (a Register'd user exists on only one task - SPEC.md 5.4)");
+
+  const session = await users.login({ email: "demo@example.com", password: "demo-password" });
   console.log("logged in    -> expires", new Date(Number(session.expiresAt)).toISOString());
 
-  // The token rides in gRPC metadata, exactly as paymentd forwards it onward.
+  // The token rides in gRPC metadata, exactly as orderd forwards it onward.
   const auth = { headers: { authorization: `Bearer ${session.token}` } };
-  const me = await identity.verifyToken({}, auth);
+  const me = await users.verifyToken({}, auth);
   console.log("verified     ->", me.user?.email);
 
-  console.log("--- paymentd (each call makes a second gRPC hop to identityd) ---");
+  console.log("--- orderd: each call makes TWO more gRPC hops ---");
+  console.log("             (userd.VerifyToken, then productsd.CheckAvailability)");
 
-  const ok = await payments.authorize(
+  // Note what is NOT in this request: a price. The client sends ids and
+  // quantities; orderd asks productsd what things cost.
+  const placed = await orders.createOrder(
     {
-      amountMinor: 120_000n,
-      currency: "INR",
-      merchantId: "M-GROCER",
-      merchantCategory: "5411",
+      items: [{ productId: "p-1001", quantity: 1 }],
       idempotencyKey: `ts-${Date.now()}-a`,
     },
     auth,
   );
-  const okTxn = ok.transaction!;
-  console.log("approved     ->", rupees(okTxn.amountMinor), Decision[okTxn.decision]);
+  const order = placed.order!;
+  console.log(
+    "ordered      ->",
+    OrderStatus[order.status],
+    rupees(order.totalMinor),
+    `(${order.lines.length} line priced by productsd)`,
+  );
 
-  // Same key twice must not authorize twice.
+  // Same key twice must not place two orders.
   const replayKey = `ts-${Date.now()}-replay`;
-  const first = await payments.authorize(
-    { amountMinor: 50_000n, currency: "INR", merchantId: "M-CAFE", merchantCategory: "5812", idempotencyKey: replayKey },
+  const first = await orders.createOrder(
+    { items: [{ productId: "p-1002", quantity: 1 }], idempotencyKey: replayKey },
     auth,
   );
-  const second = await payments.authorize(
-    { amountMinor: 50_000n, currency: "INR", merchantId: "M-CAFE", merchantCategory: "5812", idempotencyKey: replayKey },
+  const second = await orders.createOrder(
+    { items: [{ productId: "p-1002", quantity: 1 }], idempotencyKey: replayKey },
     auth,
   );
   console.log(
     "idempotent   ->",
-    first.transaction!.id === second.transaction!.id ? "same transaction" : "BUG: different ids",
+    first.order!.id === second.order!.id ? "same order" : "BUG: different ids",
     `(replay=${second.idempotentReplay})`,
   );
 
-  // Over the per-transaction limit. A decline is a business outcome, so it
-  // arrives as OK with a DECLINED decision - not as a thrown error.
-  const declined = await payments.authorize(
-    {
-      amountMinor: 4_500_000n,
-      currency: "INR",
-      merchantId: "M-TV",
-      merchantCategory: "5732",
-      idempotencyKey: `ts-${Date.now()}-b`,
-    },
+  // p-1003 is seeded with zero stock. A rejection is a business outcome, so it
+  // arrives as OK with a REJECTED status - not as a thrown error. Clients
+  // branch on an enum, never on a message string.
+  const rejected = await orders.createOrder(
+    { items: [{ productId: "p-1003", quantity: 1 }], idempotencyKey: `ts-${Date.now()}-b` },
     auth,
   );
-  const badTxn = declined.transaction!;
   console.log(
-    "declined     ->",
-    rupees(badTxn.amountMinor),
-    Decision[badTxn.decision],
-    DeclineReason[badTxn.declineReason],
+    "rejected     ->",
+    OrderStatus[rejected.order!.status],
+    RejectionReason[rejected.order!.rejectionReason],
   );
 
-  const why = await payments.explainDecision({ transactionId: badTxn.id }, auth);
-  console.log(`explanation  -> "${why.explanation}" [${why.provider}]`);
-
-  const list = await payments.listTransactions({ pageSize: 5 }, auth);
-  console.log("history      ->", list.transactions.length, "transactions");
+  const history = await orders.listOrders({ pageSize: 5 }, auth);
+  console.log("history      ->", history.orders.length, "orders");
 
   console.log("--- typed errors cross the language boundary ---");
+
   try {
-    await identity.register({ name: "Duplicate", email, password });
-    console.error("BUG: duplicate registration should have failed");
+    await users.login({ email: "demo@example.com", password: "wrong-password" });
+    console.error("BUG: a wrong password should have failed");
     process.exitCode = 1;
   } catch (err) {
-    console.log("duplicate    ->", codeOf(err));
+    console.log("bad password ->", codeOf(err));
   }
 
   try {
-    await payments.authorize(
-      { amountMinor: 1n, currency: "INR", merchantId: "M-X", merchantCategory: "5411", idempotencyKey: "nope" },
+    await orders.createOrder(
+      { items: [{ productId: "p-1001", quantity: 1 }], idempotencyKey: "nope" },
       { headers: { authorization: "Bearer nonsense" } },
     );
     console.error("BUG: a bogus token should have failed");
@@ -138,11 +140,11 @@ async function main(): Promise<void> {
   }
 
   try {
-    await payments.authorize({ amountMinor: 0n, currency: "INR", idempotencyKey: "zero" } as never, auth);
-    console.error("BUG: a zero amount should have failed");
+    await orders.createOrder({ items: [], idempotencyKey: `ts-${Date.now()}-empty` }, auth);
+    console.error("BUG: an empty cart should have failed");
     process.exitCode = 1;
   } catch (err) {
-    console.log("zero amount  ->", codeOf(err));
+    console.log("empty cart   ->", codeOf(err));
   }
 }
 
