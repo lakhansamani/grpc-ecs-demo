@@ -5,7 +5,7 @@
 //
 // By default grpc-go uses the `pick_first` load-balancing policy: it resolves
 // the target, connects to ONE address, and sends every RPC over that one
-// HTTP/2 connection. So you scale identityd to three tasks, Cloud Map returns
+// HTTP/2 connection. So you scale userd to three tasks, Cloud Map returns
 // three A records, and 100% of your traffic still lands on a single task.
 // People conclude DNS is broken. DNS is fine; the client simply never asked
 // for balancing.
@@ -23,6 +23,7 @@ package grpcclient
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -53,8 +54,14 @@ type Options struct {
 // roundRobin tells grpc-go to spread RPCs across every resolved address.
 const roundRobin = `{"loadBalancingConfig":[{"round_robin":{}}]}`
 
+// brokenLB exists so the bug can be DEMONSTRATED, not just described. Set
+// LB_POLICY=pick_first and the client reverts to grpc-go's defaults: no
+// service config, and no dns:/// prefix either - because fixing only one of
+// the two looks like it works and does not. Anything else is the fix.
+func brokenLB() bool { return os.Getenv("LB_POLICY") == "pick_first" }
+
 // Dial connects to target, which may be "host:port" or an explicit scheme such
-// as "dns:///identityd.ecom.local:50051".
+// as "dns:///userd.ecom.local:50051".
 func Dial(target string, opts Options) (*grpc.ClientConn, error) {
 	if opts.Registry == nil {
 		return nil, fmt.Errorf("grpcclient: a prometheus registry is required")
@@ -75,13 +82,15 @@ func Dial(target string, opts Options) (*grpc.ClientConn, error) {
 		// Plaintext inside the VPC. TLS terminates at the ALB; task-to-task
 		// traffic is authenticated at the packet level by the VPC itself.
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultServiceConfig(roundRobin),
 		grpc.WithUnaryInterceptor(clientMetrics.UnaryClientInterceptor()),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                20 * time.Second,
 			Timeout:             5 * time.Second,
 			PermitWithoutStream: true,
 		}),
+	}
+	if !brokenLB() {
+		dialOpts = append(dialOpts, grpc.WithDefaultServiceConfig(roundRobin))
 	}
 	if opts.TracerProvider != nil {
 		dialOpts = append(dialOpts, grpc.WithStatsHandler(
@@ -105,6 +114,9 @@ func Dial(target string, opts Options) (*grpc.ClientConn, error) {
 func normalizeTarget(target string) string {
 	if strings.Contains(target, "://") {
 		return target
+	}
+	if brokenLB() {
+		return target // passthrough resolver: exactly one address, ever
 	}
 	return "dns:///" + target
 }

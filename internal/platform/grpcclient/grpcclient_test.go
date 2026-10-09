@@ -15,15 +15,28 @@ import (
 // choose between and the load-balancing fix silently does nothing.
 func TestNormalizeTarget(t *testing.T) {
 	for in, want := range map[string]string{
-		"identityd.ecom.local:50051":        "dns:///identityd.ecom.local:50051",
-		"localhost:50051":                   "dns:///localhost:50051",
-		"dns:///identityd.ecom.local:50051": "dns:///identityd.ecom.local:50051",
-		"passthrough:///127.0.0.1:50051":    "passthrough:///127.0.0.1:50051",
-		"unix:///tmp/x.sock":                "unix:///tmp/x.sock",
+		"userd.ecom.local:50051":         "dns:///userd.ecom.local:50051",
+		"localhost:50051":                "dns:///localhost:50051",
+		"dns:///userd.ecom.local:50051":  "dns:///userd.ecom.local:50051",
+		"passthrough:///127.0.0.1:50051": "passthrough:///127.0.0.1:50051",
+		"unix:///tmp/x.sock":             "unix:///tmp/x.sock",
 	} {
 		if got := normalizeTarget(in); got != want {
 			t.Errorf("normalizeTarget(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// The demo toggle must break BOTH halves. If it left dns:/// in place the
+// "before" state would still resolve every task and the stage demo would show
+// nothing going wrong.
+func TestBrokenLBTogglePassesTargetThrough(t *testing.T) {
+	t.Setenv("LB_POLICY", "pick_first")
+	if got := normalizeTarget("userd.ecom.local:50051"); got != "userd.ecom.local:50051" {
+		t.Errorf("with LB_POLICY=pick_first, normalizeTarget returned %q, want it untouched", got)
+	}
+	if !brokenLB() {
+		t.Error("brokenLB() should be true when LB_POLICY=pick_first")
 	}
 }
 

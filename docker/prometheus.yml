@@ -1,0 +1,83 @@
+# Scrapes the ECS task containers that Ministack launches.
+#
+# Static targets would not work: task IPs are assigned at runtime and change on
+# every deploy, and there may be three userd tasks or one. Locally this uses
+# Docker service discovery; on AWS the equivalent is dns_sd_configs against the
+# Cloud Map name.
+#
+# TWO things make this harder than it looks, and both are faithful to Fargate:
+#
+#   1. awsvpc task containers expose NO ports, so docker SD cannot discover a
+#      port to scrape - __meta_docker_port_private_port is empty. The metrics
+#      port has to be supplied per service, below.
+#   2. Each task container is attached to two networks (ecom-infra for
+#      jaeger/prometheus, ecom-dns for the service-discovery aliases), and
+#      docker SD emits an entry per network. Scraping by task IP would then
+#      give two series per task and `sum by (task)` would double-count. So the
+#      address is built from the CONTAINER NAME, which is unique per task:
+#      prometheus shares the ecom-infra network, so Docker's embedded DNS
+#      resolves it, and the duplicate entries collapse into one target because
+#      their label sets come out identical.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: ecs-tasks
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+
+    relabel_configs:
+      # Only the containers Ministack started for ECS tasks.
+      - source_labels: [__meta_docker_container_name]
+        regex: '/ministack-ecs-.*'
+        action: keep
+
+      # /ministack-ecs-<taskid>-<service>
+      - source_labels: [__meta_docker_container_name]
+        regex: '/ministack-ecs-[0-9a-f]+-(.+)'
+        target_label: service
+
+      # task=<the 8-char task id>, so you can tell the three userd tasks apart.
+      # THIS is the label that makes the load-balancing demo visible:
+      #   sum by (task) (grpc_server_started_total{service="userd"})
+      - source_labels: [__meta_docker_container_name]
+        regex: '/ministack-ecs-([0-9a-f]+)-.+'
+        target_label: task
+
+      # service -> metrics port. Must be hardcoded: see note 1 above.
+      # Keep in sync with METRICS_ADDR in terraform/stack/main.tf.
+      - source_labels: [service]
+        regex: 'userd'
+        target_label: __tmp_port
+        replacement: '9091'
+      - source_labels: [service]
+        regex: 'orderd'
+        target_label: __tmp_port
+        replacement: '9092'
+      - source_labels: [service]
+        regex: 'productsd'
+        target_label: __tmp_port
+        replacement: '9093'
+      - source_labels: [service]
+        regex: 'gatewayd'
+        target_label: __tmp_port
+        replacement: '9094'
+
+      # Strip docker's leading slash off the container name.
+      - source_labels: [__meta_docker_container_name]
+        regex: '/(.+)'
+        target_label: __tmp_host
+        replacement: '${1}'
+
+      - source_labels: [__tmp_host, __tmp_port]
+        separator: ':'
+        regex: '(.+):(\d+)'
+        target_label: __address__
+        replacement: '${1}:${2}'
+
+      # Anything we could not assign a port to is not ours.
+      - source_labels: [__tmp_port]
+        regex: ''
+        action: drop
