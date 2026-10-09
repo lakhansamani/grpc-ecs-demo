@@ -16,7 +16,7 @@ variable "operator_ingress_cidrs" {
 # is available in all commercial regions, so any of them works.
 variable "aws_region" {
   type    = string
-  default = "ap-south-1"
+  default = "us-east-1"
 }
 
 variable "user_desired_count" {

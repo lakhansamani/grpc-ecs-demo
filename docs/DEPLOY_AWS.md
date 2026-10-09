@@ -22,9 +22,23 @@ export AWS_PROFILE=my-sandbox
 aws sts get-caller-identity
 ```
 
-The stack defaults to **`ap-south-1`** (Mumbai). Change it in
-`terraform/envs/aws/main.tf` if you want somewhere else — but note **Fargate
-ARM64 must be available in that region**, which it is in all commercial regions.
+The stack defaults to **`us-east-1`**. Override with
+`-var aws_region=...` — Fargate ARM64 is available in every commercial region,
+so any of them works.
+
+**Signing in without an access key** (preferred — nothing long-lived is stored):
+
+```sh
+aws login --profile awsug-bdq      # opens a browser; sign in with the console
+                                   # username and password
+aws configure set region us-east-1 --profile awsug-bdq
+export AWS_PROFILE=awsug-bdq
+```
+
+`aws login` exchanges your console session for short-lived credentials and
+refreshes them automatically. If it is unavailable for your account, AWS
+CloudShell is the other no-key route — it now supports Docker, so the whole
+build-and-push flow runs there.
 
 ## 1 · Check you have the permissions
 
@@ -73,7 +87,7 @@ ARM64, because Fargate Graviton is cheaper and it is native on Apple silicon.
 cd ../../..                     # back to the repo root
 
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-REGION=ap-south-1
+REGION=${AWS_REGION:-us-east-1}
 ECR="$ACCOUNT.dkr.ecr.$REGION.amazonaws.com"
 
 aws ecr get-login-password --region "$REGION" \
