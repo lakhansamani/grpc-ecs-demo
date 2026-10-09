@@ -108,35 +108,38 @@ forward-stop:
 	@echo "forwarders stopped"
 
 # ---- loop 1: no docker, no emulator, fastest possible ----
-# Two terminals. SQLite files in ./data. This is where you write business
+# Three terminals. SQLite files in ./data. This is where you write business
 # logic: a change is one ^C and one `go run` away, about two seconds.
-# It exercises the services and the gRPC hop between them, and nothing else.
 DEV_JWT_SECRET ?= local-dev-secret-not-for-anything-real
 DEV_DATA       ?= ./data
+
+dev-seed:
+	@mkdir -p $(DEV_DATA)
+	go run ./cmd/seed -user-db "file:$(DEV_DATA)/user.db" -product-db "file:$(DEV_DATA)/product.db"
 
 dev-userd:
 	@mkdir -p $(DEV_DATA)
 	JWT_SECRET=$(DEV_JWT_SECRET) \
 	DB_URL="file:$(DEV_DATA)/user.db" \
 	GRPC_ADDR=":50051" METRICS_ADDR=":9091" \
-	go run ./cmd/identityd
+	go run ./cmd/userd
+
+dev-productsd:
+	@mkdir -p $(DEV_DATA)
+	DB_URL="file:$(DEV_DATA)/product.db" \
+	GRPC_ADDR=":50053" METRICS_ADDR=":9093" \
+	go run ./cmd/productsd
 
 dev-orderd:
 	@mkdir -p $(DEV_DATA)
-	IDENTITY_ADDR="localhost:50051" \
-	DB_URL="file:$(DEV_DATA)/payment.db" \
+	USER_ADDR="localhost:50051" PRODUCT_ADDR="localhost:50053" \
+	DB_URL="file:$(DEV_DATA)/order.db" \
 	GRPC_ADDR=":50052" METRICS_ADDR=":9092" \
-	go run ./cmd/paymentd
+	go run ./cmd/orderd
 
-# Seed the dev database with the same users the image bakes in.
-dev-seed:
-	@mkdir -p $(DEV_DATA)
-	go run ./cmd/seed -db "file:$(DEV_DATA)/user.db"
-
-# Smoke test loop 1 (talks to localhost, not to the task network).
 dev-smoke:
-	IDENTITY_ADDR=localhost:50051 PAYMENT_ADDR=localhost:50052 \
-	DEMO_NETWORK=host bash scripts/smoke.sh
+	USER_ADDR=localhost:50051 PRODUCT_ADDR=localhost:50053 ORDER_ADDR=localhost:50052 \
+	bash scripts/smoke.sh
 
 dev-clean:
 	rm -rf $(DEV_DATA)

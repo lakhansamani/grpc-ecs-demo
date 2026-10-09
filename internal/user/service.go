@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 	"gorm.io/gorm"
 
-	userv1 "github.com/lakhansamani/grpc-ecs-payments/gen/go/user/v1"
+	userv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/user/v1"
 )
 
 // MinPasswordLen is the shortest password accepted at registration.

@@ -716,7 +716,7 @@ const file_payment_v1_payment_proto_rawDesc = "" +
 	"\tAuthorize\x12\x1c.payment.v1.AuthorizeRequest\x1a\x1d.payment.v1.AuthorizeResponse\x12W\n" +
 	"\x0eGetTransaction\x12!.payment.v1.GetTransactionRequest\x1a\".payment.v1.GetTransactionResponse\x12]\n" +
 	"\x10ListTransactions\x12#.payment.v1.ListTransactionsRequest\x1a$.payment.v1.ListTransactionsResponse\x12Z\n" +
-	"\x0fExplainDecision\x12\".payment.v1.ExplainDecisionRequest\x1a#.payment.v1.ExplainDecisionResponseBGZEgithub.com/lakhansamani/grpc-ecs-payments/gen/go/payment/v1;paymentv1b\x06proto3"
+	"\x0fExplainDecision\x12\".payment.v1.ExplainDecisionRequest\x1a#.payment.v1.ExplainDecisionResponseBGZEgithub.com/lakhansamani/grpc-ecs-ecom/gen/go/payment/v1;paymentv1b\x06proto3"
 
 var (
 	file_payment_v1_payment_proto_rawDescOnce sync.Once

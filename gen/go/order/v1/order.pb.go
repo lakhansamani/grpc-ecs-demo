@@ -718,7 +718,7 @@ const file_order_v1_order_proto_rawDesc = "" +
 	"\bGetOrder\x12\x19.order.v1.GetOrderRequest\x1a\x1a.order.v1.GetOrderResponse\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/v1/orders/{id}\x12[\n" +
 	"\n" +
 	"ListOrders\x12\x1b.order.v1.ListOrdersRequest\x1a\x1c.order.v1.ListOrdersResponse\"\x12\x82\xd3\xe4\x93\x02\f\x12\n" +
-	"/v1/ordersBCZAgithub.com/lakhansamani/grpc-ecs-payments/gen/go/order/v1;orderv1b\x06proto3"
+	"/v1/ordersB?Z=github.com/lakhansamani/grpc-ecs-ecom/gen/go/order/v1;orderv1b\x06proto3"
 
 var (
 	file_order_v1_order_proto_rawDescOnce sync.Once

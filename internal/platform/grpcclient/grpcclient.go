@@ -41,6 +41,11 @@ type Options struct {
 	// was defect #6 in the repo this replaces - the collector was created and
 	// then silently never registered, so every client metric was dropped.
 	Registry *prometheus.Registry
+
+	// Subsystem names this client in the metric name. Required when one
+	// process dials more than one service (orderd dials two), or the second
+	// MustRegister panics on a duplicate collector.
+	Subsystem string
 }
 
 // roundRobin tells grpc-go to spread RPCs across every resolved address.
@@ -54,7 +59,15 @@ func Dial(target string, opts Options) (*grpc.ClientConn, error) {
 	}
 
 	clientMetrics := grpcprom.NewClientMetrics()
-	opts.Registry.MustRegister(clientMetrics)
+
+	// One process may dial several services (orderd dials two), and each
+	// outbound client registers the same collector names. Prefix them per
+	// client, or the second MustRegister panics on a duplicate.
+	reg := prometheus.Registerer(opts.Registry)
+	if opts.Subsystem != "" {
+		reg = prometheus.WrapRegistererWithPrefix(opts.Subsystem+"_", opts.Registry)
+	}
+	reg.MustRegister(clientMetrics)
 
 	dialOpts := []grpc.DialOption{
 		// Plaintext inside the VPC. TLS terminates at the ALB; task-to-task

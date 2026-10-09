@@ -4,7 +4,7 @@ package user.v1;
 
 import "google/api/annotations.proto";
 
-option go_package = "github.com/lakhansamani/grpc-ecs-payments/gen/go/user/v1;userv1";
+option go_package = "github.com/lakhansamani/grpc-ecs-ecom/gen/go/user/v1;userv1";
 
 // UserService owns accounts and tokens.
 //

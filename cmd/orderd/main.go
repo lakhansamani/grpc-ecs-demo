@@ -1,8 +1,8 @@
-// Command identityd serves UserService.
+// Command orderd serves OrderService.
 //
-// Stateless by design: its SQLite database is baked into the image, so every
-// task answers reads identically and the service can be scaled horizontally.
-// This is the service to scale to 3 tasks for the load-balancing demo.
+// The only stateful service here, so it runs as ONE task - you scale reads,
+// not writes. Every CreateOrder makes two outbound gRPC calls: UserService for
+// identity, ProductService for authoritative pricing and stock.
 package main
 
 import (
@@ -13,17 +13,19 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
+	orderv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/order/v1"
+	productv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/product/v1"
 	userv1 "github.com/lakhansamani/grpc-ecs-ecom/gen/go/user/v1"
+	"github.com/lakhansamani/grpc-ecs-ecom/internal/order"
 	"github.com/lakhansamani/grpc-ecs-ecom/internal/platform/config"
+	"github.com/lakhansamani/grpc-ecs-ecom/internal/platform/grpcclient"
 	"github.com/lakhansamani/grpc-ecs-ecom/internal/platform/grpcserver"
 	"github.com/lakhansamani/grpc-ecs-ecom/internal/platform/observability"
 	"github.com/lakhansamani/grpc-ecs-ecom/internal/platform/store"
-	"github.com/lakhansamani/grpc-ecs-ecom/internal/user"
 )
 
-const serviceName = "userd"
+const serviceName = "orderd"
 
-// version is stamped at build time: -ldflags "-X main.version=..."
 var version = "dev"
 
 func main() {
@@ -36,12 +38,12 @@ func main() {
 
 func run(log *slog.Logger) error {
 	cfg := config.New()
-	// Shared across every task - see SPEC.md 6.6. Sourced from Secrets Manager.
-	jwtSecret := cfg.Required("JWT_SECRET")
+	userAddr := cfg.Required("USER_ADDR")
+	productAddr := cfg.Required("PRODUCT_ADDR")
 	dbDriver := cfg.Optional("DB_DRIVER", "sqlite")
-	dbURL := cfg.Optional("DB_URL", "file:/data/user.db")
-	grpcAddr := cfg.Optional("GRPC_ADDR", ":50051")
-	metricsAddr := cfg.Optional("METRICS_ADDR", ":9091")
+	dbURL := cfg.Optional("DB_URL", "file:/data/order.db")
+	grpcAddr := cfg.Optional("GRPC_ADDR", ":50052")
+	metricsAddr := cfg.Optional("METRICS_ADDR", ":9092")
 	otlpEndpoint := cfg.Optional("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	env := cfg.Optional("ENVIRONMENT", "local")
 	maxConnAge := cfg.Duration("GRPC_MAX_CONNECTION_AGE", 0)
@@ -62,26 +64,36 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	defer func() {
-		// Checked, unlike the version this replaces (defect #10), which also
-		// never reached its deferred shutdown because Serve blocked until
-		// log.Fatalf - losing every buffered span on exit.
 		if err := shutdownTracing(context.Background()); err != nil {
 			log.Warn("tracer shutdown", "err", err)
 		}
 	}()
 
-	db, err := store.Open(store.Config{Driver: dbDriver, URL: dbURL}, user.Models()...)
-	if err != nil {
-		return err
-	}
-
-	issuer, err := user.NewIssuer(jwtSecret)
+	db, err := store.Open(store.Config{Driver: dbDriver, URL: dbURL}, order.Models()...)
 	if err != nil {
 		return err
 	}
 
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+
+	// Two clients, both with round_robin over dns:/// - see grpcclient for why
+	// both halves of that matter.
+	userConn, err := grpcclient.Dial(userAddr, grpcclient.Options{
+		TracerProvider: tp, Registry: registry, Subsystem: "user",
+	})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = userConn.Close() }()
+
+	productConn, err := grpcclient.Dial(productAddr, grpcclient.Options{
+		TracerProvider: tp, Registry: registry, Subsystem: "product",
+	})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = productConn.Close() }()
 
 	srv := grpcserver.New(grpcserver.Config{
 		ServiceName:      serviceName,
@@ -93,12 +105,15 @@ func run(log *slog.Logger) error {
 		Registry:         registry,
 	}, log)
 
-	userv1.RegisterUserServiceServer(
-		srv.GRPC(),
-		user.NewService(user.NewStore(db), issuer, log),
-	)
+	orderv1.RegisterOrderServiceServer(srv.GRPC(), order.NewService(
+		order.NewStore(db),
+		userv1.NewUserServiceClient(userConn),
+		productv1.NewProductServiceClient(productConn),
+		log,
+	))
 
 	log.Info("starting", "service", serviceName, "version", version,
+		"user_addr", userAddr, "product_addr", productAddr,
 		"db_driver", dbDriver, "env", env)
 	return srv.Serve(ctx)
 }

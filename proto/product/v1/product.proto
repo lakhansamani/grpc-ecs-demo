@@ -4,7 +4,7 @@ package product.v1;
 
 import "google/api/annotations.proto";
 
-option go_package = "github.com/lakhansamani/grpc-ecs-payments/gen/go/product/v1;productv1";
+option go_package = "github.com/lakhansamani/grpc-ecs-ecom/gen/go/product/v1;productv1";
 
 // ProductService is the catalogue: browse, search, and the authoritative
 // source of price and stock.

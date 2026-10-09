@@ -4,7 +4,7 @@ package order.v1;
 
 import "google/api/annotations.proto";
 
-option go_package = "github.com/lakhansamani/grpc-ecs-payments/gen/go/order/v1;orderv1";
+option go_package = "github.com/lakhansamani/grpc-ecs-ecom/gen/go/order/v1;orderv1";
 
 // OrderService writes orders.
 //

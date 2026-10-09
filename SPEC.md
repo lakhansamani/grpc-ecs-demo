@@ -91,7 +91,7 @@ without `buf`.
 // proto/identity/v1/identity.proto
 syntax = "proto3";
 package identity.v1;
-option go_package = "github.com/lakhansamani/grpc-ecs-payments/gen/go/identity/v1;identityv1";
+option go_package = "github.com/lakhansamani/grpc-ecs-ecom/gen/go/identity/v1;identityv1";
 
 service IdentityService {
   rpc Register    (RegisterRequest)    returns (RegisterResponse);
@@ -114,7 +114,7 @@ message VerifyTokenResponse { User user = 1; }
 // proto/payment/v1/payment.proto
 syntax = "proto3";
 package payment.v1;
-option go_package = "github.com/lakhansamani/grpc-ecs-payments/gen/go/payment/v1;paymentv1";
+option go_package = "github.com/lakhansamani/grpc-ecs-ecom/gen/go/payment/v1;paymentv1";
 
 service PaymentService {
   rpc Authorize        (AuthorizeRequest)        returns (AuthorizeResponse);
