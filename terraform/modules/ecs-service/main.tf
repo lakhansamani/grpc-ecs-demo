@@ -8,6 +8,20 @@ variable "name" { type = string }
 variable "cluster_id" { type = string }
 variable "image" { type = string }
 variable "container_port" { type = number }
+
+# "grpc" for the three gRPC services, "http" for gatewayd. It decides the
+# port mapping's appProtocol and which health-check mode the baked-in
+# /healthcheck binary uses - distroless has no shell or curl, so both modes
+# live in that one Go binary.
+variable "protocol" {
+  type    = string
+  default = "grpc"
+
+  validation {
+    condition     = contains(["grpc", "http"], var.protocol)
+    error_message = "protocol must be grpc or http."
+  }
+}
 variable "metrics_port" { type = number }
 
 variable "cpu" {
@@ -111,7 +125,10 @@ variable "tags" {
 }
 
 locals {
-  health_command = [
+  health_command = var.protocol == "http" ? [
+    "CMD", "/healthcheck",
+    "-http", "http://localhost:${var.container_port}/healthz",
+    ] : [
     "CMD", "/healthcheck",
     "-addr", "localhost:${var.container_port}",
     "-service", var.name,
@@ -145,7 +162,7 @@ resource "aws_ecs_task_definition" "this" {
         # appProtocol grpc is what lets ECS Service Connect's proxy balance
         # per REQUEST rather than per connection. Harmless without Service
         # Connect, and required with it.
-        appProtocol = "grpc"
+        appProtocol = var.protocol
       },
       {
         name          = "metrics"

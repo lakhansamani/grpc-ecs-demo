@@ -46,7 +46,7 @@ dns:
 	@for cid in $$(docker ps --filter "name=ministack-ecs-" -q); do \
 		docker network disconnect -f ecom-dns $$cid >/dev/null 2>&1 || true; \
 	done
-	@for svc in identityd paymentd; do \
+	@for svc in userd productsd orderd gatewayd; do \
 		cids=$$(docker ps --filter "name=ministack-ecs-.*-$$svc$$" -q); \
 		if [ -z "$$cids" ]; then echo "no running task for $$svc"; continue; fi; \
 		for cid in $$cids; do \
@@ -77,10 +77,22 @@ demo:
 demo-load:
 	go run ./cmd/demo-client -mode=load
 
+# Scale a stateless service. SVC defaults to userd, the busiest hop.
+SCALE_SVC ?= userd
 scale:
 	aws --endpoint-url http://localhost:4566 ecs update-service \
-		--cluster ecom-local --service identityd --desired-count $(N)
-	$(MAKE) dns
+		--cluster payments-local --service $(SCALE_SVC) --desired-count $(N) >/dev/null
+	@sleep 12
+	@$(MAKE) --no-print-directory dns
+	@aws --endpoint-url http://localhost:4566 ecs describe-services \
+		--cluster payments-local --services $(SCALE_SVC) \
+		--query 'services[0].{Service:serviceName,Desired:desiredCount,Running:runningCount}' --output table
+
+# Terraform refuses to scale the one service that writes.
+show-guard:
+	-@terraform -chdir=terraform/envs/local plan -var order_desired_count=3 -no-color 2>&1 \
+		| grep -A8 "Invalid value for variable"
+
 
 # ---- codegen: ONE proto, Go + TypeScript ----
 # Generated code is committed, so a clone builds without buf installed.

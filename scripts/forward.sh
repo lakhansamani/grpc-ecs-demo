@@ -15,7 +15,7 @@
 set -uo pipefail
 
 NETWORK="${TASK_NETWORK:-ecom-dns}"
-declare -a MAP=("identityd:50051" "paymentd:50052")
+declare -a MAP=("userd:50051" "orderd:50052" "productsd:50053" "gatewayd:8080")
 
 for entry in "${MAP[@]}"; do
   svc="${entry%%:*}"

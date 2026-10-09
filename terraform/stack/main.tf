@@ -16,22 +16,36 @@ variable "namespace" {
 }
 variable "environment" { type = string }
 
-variable "identity_image" { type = string }
-variable "payment_image" { type = string }
+variable "user_image" { type = string }
+variable "product_image" { type = string }
+variable "order_image" { type = string }
+variable "gateway_image" { type = string }
 
-variable "identity_desired_count" {
+variable "user_desired_count" {
   type        = number
   default     = 1
-  description = "Scale this one. It is stateless - its SQLite file is baked into the image."
+  description = "Stateless - its SQLite file is baked into the image. Scale this one."
 }
-variable "payment_desired_count" {
+
+variable "product_desired_count" {
   type        = number
   default     = 1
-  description = "MUST stay 1: paymentd holds writable state on its task filesystem."
+  description = "Stateless and read-only. Browse and search reads dominate, so this is the other one you scale."
+}
+
+variable "gateway_desired_count" {
+  type        = number
+  default     = 1
+  description = "Stores nothing at all, so it scales freely."
+}
+variable "order_desired_count" {
+  type        = number
+  default     = 1
+  description = "MUST stay 1: orderd writes to SQLite on its own task filesystem."
 
   validation {
-    condition     = var.payment_desired_count == 1
-    error_message = "paymentd keeps its database on the task filesystem, so N tasks would mean N divergent databases. Scale identityd instead (SPEC.md 6.4)."
+    condition     = var.order_desired_count == 1
+    error_message = "orderd keeps its database on the task filesystem, so N tasks would mean N divergent databases. Scale userd or productsd instead."
   }
 }
 
@@ -123,8 +137,10 @@ variable "tags" {
 }
 
 locals {
-  identity_port = 50051
-  payment_port  = 50052
+  user_port    = 50051
+  order_port   = 50052
+  product_port = 50053
+  gateway_port = 8080
   tags = merge(var.tags, {
     Project     = var.name_prefix
     Environment = var.environment
@@ -136,14 +152,14 @@ module "network" {
   source             = "../modules/network"
   name               = "${var.name_prefix}-${var.environment}"
   availability_zones = var.availability_zones
-  grpc_ports         = [local.identity_port, local.payment_port]
+  grpc_ports         = [local.user_port, local.order_port, local.product_port, local.gateway_port]
   ingress_cidrs      = var.operator_ingress_cidrs
   tags               = local.tags
 }
 
 module "ecr" {
   source = "../modules/ecr"
-  names  = ["identityd", "paymentd"]
+  names  = ["userd", "productsd", "orderd", "gatewayd"]
   tags   = local.tags
 }
 
@@ -179,39 +195,45 @@ locals {
   )
 }
 
-# identityd: stateless, scalable, and the service the load-balancing segment
-# scales to three tasks.
-module "identityd" {
+# ---------------------------------------------------------------------------
+# Four services, three storage shapes. Each one scales for a different reason,
+# and that reason is its storage - not its traffic.
+# ---------------------------------------------------------------------------
+
+# userd: database baked into the image, so every task answers reads
+# identically. Called by gatewayd AND orderd, which makes it the busiest hop
+# in the system and the one the load-balancing segment scales.
+module "userd" {
   source = "../modules/ecs-service"
 
-  name                   = "identityd"
+  name                   = "userd"
+  cluster_id             = module.cluster.cluster_id
+  image                  = var.user_image
+  container_port         = local.user_port
+  metrics_port           = 9091
+  desired_count          = var.user_desired_count
   use_spot               = var.use_spot
   enable_execute_command = var.enable_execute_command
-  cluster_id             = module.cluster.cluster_id
-  image                  = var.identity_image
-  container_port         = local.identity_port
-  metrics_port           = 9091
-  desired_count          = var.identity_desired_count
 
   subnet_ids         = module.network.subnet_ids
   security_group_ids = [module.network.security_group_id]
 
   environment = merge({
     ENVIRONMENT                 = var.environment
-    GRPC_ADDR                   = ":${local.identity_port}"
+    GRPC_ADDR                   = ":${local.user_port}"
     METRICS_ADDR                = ":9091"
     OTEL_EXPORTER_OTLP_ENDPOINT = var.otlp_endpoint
     # Recycle connections so clients re-resolve DNS and actually see new tasks
-    # after a scale-out. Without this, round_robin on the client is not enough.
+    # after a scale-out. Client-side round_robin alone is not enough.
     GRPC_MAX_CONNECTION_AGE = "30s"
-    # Must stay below the task's stop_timeout (30s) or the drain gets cut off.
+    # Must stay below the task's stop_timeout (30s) or the drain is cut off.
     SHUTDOWN_TIMEOUT = "15s"
     },
     var.use_secrets_manager ? {} : { JWT_SECRET = local.jwt_plain_value }
   )
 
-  # Every identityd task must share one signing secret, or a token minted by
-  # one task fails on another. This is why the demo wants Secrets Manager.
+  # Every userd task must share one signing secret, or a token minted by one
+  # task fails verification on another.
   secrets = var.use_secrets_manager ? { JWT_SECRET = module.secrets[0].arn } : {}
 
   log_group_name           = module.cluster.log_group_name
@@ -223,34 +245,109 @@ module "identityd" {
   tags                     = local.tags
 }
 
-# paymentd: single task, writable state, and the demo's closing lesson.
-module "paymentd" {
+# productsd: catalogue and FTS5 search index, also baked in. Read-only at
+# runtime, so it scales out when browse traffic spikes.
+module "productsd" {
   source = "../modules/ecs-service"
 
-  name                   = "paymentd"
+  name                   = "productsd"
+  cluster_id             = module.cluster.cluster_id
+  image                  = var.product_image
+  container_port         = local.product_port
+  metrics_port           = 9093
+  desired_count          = var.product_desired_count
   use_spot               = var.use_spot
   enable_execute_command = var.enable_execute_command
+
+  subnet_ids         = module.network.subnet_ids
+  security_group_ids = [module.network.security_group_id]
+
+  environment = {
+    ENVIRONMENT                 = var.environment
+    GRPC_ADDR                   = ":${local.product_port}"
+    METRICS_ADDR                = ":9093"
+    OTEL_EXPORTER_OTLP_ENDPOINT = var.otlp_endpoint
+    GRPC_MAX_CONNECTION_AGE     = "30s"
+    SHUTDOWN_TIMEOUT            = "15s"
+  }
+
+  log_group_name           = module.cluster.log_group_name
+  aws_region               = var.aws_region
+  execution_role_arn       = module.iam.execution_role_arn
+  task_role_arn            = module.iam.task_role_arn
+  namespace_id             = module.cluster.namespace_id
+  enable_service_discovery = var.enable_service_discovery
+  tags                     = local.tags
+}
+
+# orderd: the only service that WRITES. Its database starts empty and lives on
+# the task filesystem, so it stays at one task - enforced by the validation on
+# order_desired_count. Makes two outbound hops per order.
+module "orderd" {
+  source = "../modules/ecs-service"
+
+  name                   = "orderd"
   cluster_id             = module.cluster.cluster_id
-  image                  = var.payment_image
-  container_port         = local.payment_port
+  image                  = var.order_image
+  container_port         = local.order_port
   metrics_port           = 9092
-  desired_count          = var.payment_desired_count
+  desired_count          = var.order_desired_count
+  use_spot               = var.use_spot
+  enable_execute_command = var.enable_execute_command
 
   subnet_ids         = module.network.subnet_ids
   security_group_ids = [module.network.security_group_id]
 
   environment = {
     ENVIRONMENT = var.environment
-    # Cloud Map name, not an IP. dns:/// resolution plus round_robin on the
-    # client is what spreads load across identityd's tasks.
-    IDENTITY_ADDR               = "identityd.${module.cluster.namespace_name}:${local.identity_port}"
-    GRPC_ADDR                   = ":${local.payment_port}"
+    # Cloud Map names, not IPs. dns:/// resolution plus client-side
+    # round_robin is what spreads load across the upstream tasks.
+    USER_ADDR                   = "userd.${module.cluster.namespace_name}:${local.user_port}"
+    PRODUCT_ADDR                = "productsd.${module.cluster.namespace_name}:${local.product_port}"
+    GRPC_ADDR                   = ":${local.order_port}"
     METRICS_ADDR                = ":9092"
     OTEL_EXPORTER_OTLP_ENDPOINT = var.otlp_endpoint
     GRPC_MAX_CONNECTION_AGE     = "30s"
     SHUTDOWN_TIMEOUT            = "15s"
-    LLM_PROVIDER                = var.llm_provider
-    AWS_REGION                  = var.aws_region
+  }
+
+  log_group_name           = module.cluster.log_group_name
+  aws_region               = var.aws_region
+  execution_role_arn       = module.iam.execution_role_arn
+  task_role_arn            = module.iam.task_role_arn
+  namespace_id             = module.cluster.namespace_id
+  enable_service_discovery = var.enable_service_discovery
+  tags                     = local.tags
+}
+
+# gatewayd: REST in, gRPC out. Stores nothing, so it is the easiest to scale
+# and the right thing to put an ALB in front of. protocol = "http" switches
+# the health check to the HTTP mode of the baked-in probe binary.
+module "gatewayd" {
+  source = "../modules/ecs-service"
+
+  name                   = "gatewayd"
+  cluster_id             = module.cluster.cluster_id
+  image                  = var.gateway_image
+  container_port         = local.gateway_port
+  metrics_port           = 9094
+  protocol               = "http"
+  desired_count          = var.gateway_desired_count
+  use_spot               = var.use_spot
+  enable_execute_command = var.enable_execute_command
+
+  subnet_ids         = module.network.subnet_ids
+  security_group_ids = [module.network.security_group_id]
+
+  environment = {
+    ENVIRONMENT                 = var.environment
+    USER_ADDR                   = "userd.${module.cluster.namespace_name}:${local.user_port}"
+    PRODUCT_ADDR                = "productsd.${module.cluster.namespace_name}:${local.product_port}"
+    ORDER_ADDR                  = "orderd.${module.cluster.namespace_name}:${local.order_port}"
+    HTTP_ADDR                   = ":${local.gateway_port}"
+    METRICS_ADDR                = ":9094"
+    OTEL_EXPORTER_OTLP_ENDPOINT = var.otlp_endpoint
+    SHUTDOWN_TIMEOUT            = "15s"
   }
 
   log_group_name           = module.cluster.log_group_name
@@ -277,5 +374,11 @@ output "ecr_repository_urls" { value = module.ecr.repository_urls }
 output "jwt_secret_name" {
   value = var.use_secrets_manager ? module.secrets[0].name : "(plain env var - no Secrets Manager)"
 }
-output "identity_dns" { value = "identityd.${module.cluster.namespace_name}:${local.identity_port}" }
-output "payment_dns" { value = "paymentd.${module.cluster.namespace_name}:${local.payment_port}" }
+output "service_addresses" {
+  value = {
+    userd     = "userd.${module.cluster.namespace_name}:${local.user_port}"
+    productsd = "productsd.${module.cluster.namespace_name}:${local.product_port}"
+    orderd    = "orderd.${module.cluster.namespace_name}:${local.order_port}"
+    gatewayd  = "gatewayd.${module.cluster.namespace_name}:${local.gateway_port}"
+  }
+}
