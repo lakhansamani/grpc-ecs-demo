@@ -138,6 +138,7 @@ Each of these is a trade-off, not an accident. `SPEC.md` has the reasoning.
 | [`PRESENTATION.md`](PRESENTATION.md) | the talk itself — 21 slides with speaker notes. Renders with Marp, reads fine on GitHub |
 | [`SPEC.md`](SPEC.md) | the full specification, with every claim marked verified or not |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | step-by-step local demo, and the local/AWS capability matrix |
+| [`docs/DEPLOY_AWS.md`](docs/DEPLOY_AWS.md) | step by step onto a real AWS account, and how to tear it down |
 | [`docs/AWS_PERMISSIONS.md`](docs/AWS_PERMISSIONS.md) | exactly what IAM you need, and what to skip |
 | [`docs/DEMO_ACCESS.md`](docs/DEMO_ACCESS.md) | reaching the services from Postman: public IP vs. SSM port forwarding vs. ALB |
 
