@@ -11,12 +11,12 @@
 # Find yours:  aws iam list-roles --query 'Roles[?contains(RoleName,`ecsTaskExecution`)].Arn'
 existing_execution_role_arn = "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole"
 
-# JWT_SECRET as a plain env value. Still ONE shared value across all identityd
+# JWT_SECRET as a plain env value. Still ONE shared value across all userd
 # tasks, so scaling and the load-balancing demo still work.
 use_secrets_manager = false
 
-# Cloud Map also requires Route 53 permissions. With it off, paymentd needs
-# identityd's address another way - see docs/AWS_PERMISSIONS.md.
+# Cloud Map also requires Route 53 permissions. With it off, orderd needs
+# userd's address another way - see docs/AWS_PERMISSIONS.md.
 # Leave TRUE if you can get servicediscovery + route53: it is the best segment.
 enable_service_discovery = true
 

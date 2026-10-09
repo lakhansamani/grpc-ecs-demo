@@ -92,7 +92,7 @@ variable "use_secrets_manager" {
             definition's `secrets` block. The real pattern, and the version to
             demo if the account allows it.
     false - JWT_SECRET is passed as a plain environment value. Needs no
-            Secrets Manager permission. Every identityd task still shares one
+            Secrets Manager permission. Every userd task still shares one
             secret, so scaling still works; you just lose the segment that
             shows the value never entering the image.
   EOT
