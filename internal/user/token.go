@@ -39,7 +39,7 @@ func (i *Issuer) Issue(userID string, now time.Time) (string, int64, error) {
 			Subject:   userID,
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(exp),
-			Issuer:    "identityd",
+			Issuer:    "userd",
 		},
 	})
 	signed, err := tok.SignedString(i.secret)
@@ -61,7 +61,7 @@ func (i *Issuer) Verify(token string) (string, error) {
 		func(t *jwt.Token) (any, error) { return i.secret, nil },
 		// Pin the algorithm. Without this, `alg` is attacker-controlled.
 		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
-		jwt.WithIssuer("identityd"),
+		jwt.WithIssuer("userd"),
 		jwt.WithExpirationRequired(),
 	)
 	if err != nil {

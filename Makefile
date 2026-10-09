@@ -82,7 +82,8 @@ SCALE_SVC ?= userd
 scale:
 	aws --endpoint-url http://localhost:4566 ecs update-service \
 		--cluster payments-local --service $(SCALE_SVC) --desired-count $(N) >/dev/null
-	@sleep 12
+	@echo "waiting for the new tasks to come up..."
+	@sleep 20
 	@$(MAKE) --no-print-directory dns
 	@aws --endpoint-url http://localhost:4566 ecs describe-services \
 		--cluster payments-local --services $(SCALE_SVC) \
