@@ -206,9 +206,13 @@ visual only.
 
 ---
 
-## 6. Data: SQLite, not RDS
+## 6. Data: SQLite for the demo — RDS in production
 
-### 6.1 Why
+**Framing for the talk: say plainly that RDS is the right answer and SQLite is a
+conference-demo shortcut.** The `rds` module stays in the repo, unapplied, and
+`DB_DRIVER=postgres` is the whole switch.
+
+### 6.1 Why the shortcut
 
 RDS is the slowest and most expensive part of the demo: ~5–10 min to create on AWS, ~80s on
 Ministack ✅, plus a subnet group, a security group rule, and ~$12–15/mo if left running. Dropping it

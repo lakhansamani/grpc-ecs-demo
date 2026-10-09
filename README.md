@@ -81,10 +81,16 @@ grpc.KeepaliveParams(keepalive.ServerParameters{
 
 Each of these is a trade-off, not an accident. `SPEC.md` has the reasoning.
 
-- **SQLite, not RDS.** Takes the AWS apply from ~10 minutes to ~2. Data dies with
-  the task — which becomes the closing lesson rather than a thing to hide. Needs
-  the **pure-Go** driver (`glebarez/sqlite`); `gorm.io/driver/sqlite` requires CGO
-  and breaks the static distroless build.
+- **SQLite for the demo only — RDS is what you actually want.** RDS costs 5–10
+  minutes of every apply and ~$12–15/month if you forget to destroy it, so
+  dropping it takes the AWS apply from ~10 minutes to ~2. That is the only
+  reason it is not here; for anything handling real payments, use RDS. The
+  module is written and kept in `terraform/modules/rds`, just not applied by
+  default — `DB_DRIVER=postgres` is the switch. Two things worth keeping even
+  if you never ship SQLite: it needs the **pure-Go** driver
+  (`glebarez/sqlite`), because `gorm.io/driver/sqlite` requires CGO and breaks
+  the static distroless build; and **EFS is not a workaround** — SQLite's own
+  docs warn that network filesystems lead to database corruption.
 - **A template, not an LLM, writes decline explanations.** Deterministic rules
   decide; the explainer only phrases it. For a regulated decline that is the
   better engineering choice — auditable, instant, and incapable of inventing a
