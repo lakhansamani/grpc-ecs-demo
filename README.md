@@ -183,7 +183,7 @@ Each of these is a trade-off, not an accident. `SPEC.md` has the reasoning.
 
 | | |
 |---|---|
-| [`PRESENTATION.md`](PRESENTATION.md) | the talk itself — 21 slides with speaker notes. Renders with Marp, reads fine on GitHub |
+| [`PRESENTATION.md`](PRESENTATION.md) | the talk — `npx @marp-team/marp-cli@latest -w -s .` to present it — 21 slides with speaker notes. Renders with Marp, reads fine on GitHub |
 | [`SPEC.md`](SPEC.md) | the full specification, with every claim marked verified or not |
 | [`INSTRUCTIONS.md`](INSTRUCTIONS.md) | **manual testing.** Every `grpcurl` and `curl` command by hand, locally and on AWS by bare IP — plus how health checks are wired and what the production shape would be |
 | [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md) | **start here.** Fresh-laptop command sequence, inspecting every AWS component locally, manual tests, and the demo beat by beat |

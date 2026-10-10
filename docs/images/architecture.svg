@@ -1,0 +1,188 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 900" width="1480" height="900" font-family="Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#232F3E"/>
+    </marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#879196"/>
+    </marker>
+  </defs>
+
+  <rect width="1480" height="900" fill="#ffffff"/>
+
+  <!-- ===== AWS Cloud ===== -->
+  <rect x="300" y="20" width="1160" height="860" fill="none" stroke="#232F3E" stroke-width="2" rx="4"/>
+  <rect x="300" y="20" width="118" height="30" fill="#232F3E" rx="4"/>
+  <text x="359" y="40" fill="#fff" font-size="15" font-weight="bold" text-anchor="middle">AWS Cloud</text>
+  <text x="432" y="41" fill="#5A6B78" font-size="13">us-east-1</text>
+
+  <!-- ===== VPC ===== -->
+  <rect x="330" y="70" width="1100" height="700" fill="none" stroke="#8C4FFF" stroke-width="2" rx="4"/>
+  <rect x="330" y="70" width="188" height="28" fill="#8C4FFF" rx="4"/>
+  <text x="424" y="89" fill="#fff" font-size="13" font-weight="bold" text-anchor="middle">VPC  10.0.0.0/16</text>
+  <text x="530" y="89" fill="#8C4FFF" font-size="12">enable_dns_hostnames = true</text>
+
+  <!-- Internet gateway -->
+  <g>
+    <rect x="352" y="300" width="58" height="58" fill="#8C4FFF" rx="8"/>
+    <path d="M366 329 h30 M381 314 v30 M372 319 a22 22 0 0 0 0 20 M390 319 a22 22 0 0 1 0 20" stroke="#fff" stroke-width="2.2" fill="none"/>
+    <text x="381" y="374" font-size="11" fill="#232F3E" text-anchor="middle">Internet</text>
+    <text x="381" y="387" font-size="11" fill="#232F3E" text-anchor="middle">Gateway</text>
+  </g>
+
+  <!-- ===== AZ a ===== -->
+  <rect x="470" y="120" width="400" height="270" fill="none" stroke="#00A4A6" stroke-width="1.6" stroke-dasharray="6 4" rx="4"/>
+  <text x="486" y="142" fill="#00A4A6" font-size="12" font-weight="bold">Availability Zone A · subnet 10.0.0.0/24</text>
+
+  <!-- gatewayd -->
+  <g>
+    <rect x="496" y="160" width="54" height="54" fill="#ED7100" rx="8"/>
+    <rect x="509" y="173" width="28" height="28" fill="none" stroke="#fff" stroke-width="2.2"/>
+    <path d="M509 182 h28 M518 173 v28" stroke="#fff" stroke-width="2.2"/>
+    <text x="523" y="230" font-size="11.5" fill="#232F3E" text-anchor="middle" font-weight="bold">gatewayd</text>
+    <text x="523" y="244" font-size="10.5" fill="#5A6B78" text-anchor="middle">:8080 REST</text>
+  </g>
+
+  <!-- orderd -->
+  <g>
+    <rect x="700" y="160" width="54" height="54" fill="#ED7100" rx="8"/>
+    <rect x="713" y="173" width="28" height="28" fill="none" stroke="#fff" stroke-width="2.2"/>
+    <path d="M713 182 h28 M722 173 v28" stroke="#fff" stroke-width="2.2"/>
+    <text x="727" y="230" font-size="11.5" fill="#232F3E" text-anchor="middle" font-weight="bold">orderd</text>
+    <text x="727" y="244" font-size="10.5" fill="#5A6B78" text-anchor="middle">:50052 · 1 task</text>
+    <text x="727" y="258" font-size="10" fill="#D13212" text-anchor="middle">writes</text>
+  </g>
+
+  <text x="486" y="300" font-size="11" fill="#5A6B78">ECS service · Fargate · ARM64</text>
+  <text x="486" y="316" font-size="11" fill="#5A6B78">awsvpc: every task has its own ENI</text>
+  <text x="486" y="332" font-size="11" fill="#5A6B78">and its own private IP</text>
+
+  <!-- ===== AZ b ===== -->
+  <rect x="470" y="410" width="400" height="300" fill="none" stroke="#00A4A6" stroke-width="1.6" stroke-dasharray="6 4" rx="4"/>
+  <text x="486" y="432" fill="#00A4A6" font-size="12" font-weight="bold">Availability Zone B · subnet 10.0.1.0/24</text>
+
+  <!-- userd x3 -->
+  <g>
+    <rect x="504" y="462" width="54" height="54" fill="#ED7100" rx="8" opacity="0.35"/>
+    <rect x="500" y="458" width="54" height="54" fill="#ED7100" rx="8" opacity="0.6"/>
+    <rect x="496" y="454" width="54" height="54" fill="#ED7100" rx="8"/>
+    <rect x="509" y="467" width="28" height="28" fill="none" stroke="#fff" stroke-width="2.2"/>
+    <path d="M509 476 h28 M518 467 v28" stroke="#fff" stroke-width="2.2"/>
+    <text x="527" y="534" font-size="11.5" fill="#232F3E" text-anchor="middle" font-weight="bold">userd  ×3</text>
+    <text x="527" y="548" font-size="10.5" fill="#5A6B78" text-anchor="middle">:50051</text>
+    <text x="527" y="562" font-size="10" fill="#1D8102" text-anchor="middle">reads · scales</text>
+  </g>
+
+  <!-- productsd x3 -->
+  <g>
+    <rect x="708" y="462" width="54" height="54" fill="#ED7100" rx="8" opacity="0.35"/>
+    <rect x="704" y="458" width="54" height="54" fill="#ED7100" rx="8" opacity="0.6"/>
+    <rect x="700" y="454" width="54" height="54" fill="#ED7100" rx="8"/>
+    <rect x="713" y="467" width="28" height="28" fill="none" stroke="#fff" stroke-width="2.2"/>
+    <path d="M713 476 h28 M722 467 v28" stroke="#fff" stroke-width="2.2"/>
+    <text x="731" y="534" font-size="11.5" fill="#232F3E" text-anchor="middle" font-weight="bold">productsd  ×3</text>
+    <text x="731" y="548" font-size="10.5" fill="#5A6B78" text-anchor="middle">:50053</text>
+    <text x="731" y="562" font-size="10" fill="#1D8102" text-anchor="middle">reads · scales</text>
+  </g>
+
+  <text x="486" y="600" font-size="11" fill="#5A6B78">ECS cluster "ecom-aws" spans both zones.</text>
+  <text x="486" y="616" font-size="11" fill="#5A6B78">One task definition per service, versioned.</text>
+
+  <!-- ===== Cloud Map ===== -->
+  <g>
+    <rect x="960" y="170" width="58" height="58" fill="#8C4FFF" rx="8"/>
+    <circle cx="989" cy="194" r="9" fill="none" stroke="#fff" stroke-width="2.2"/>
+    <path d="M989 203 l-8 14 h16 z" fill="#fff"/>
+    <text x="989" y="246" font-size="11.5" fill="#232F3E" text-anchor="middle" font-weight="bold">Cloud Map</text>
+    <text x="989" y="260" font-size="10.5" fill="#5A6B78" text-anchor="middle">ecom.local</text>
+  </g>
+  <rect x="1040" y="166" width="330" height="106" fill="#F7F4FD" stroke="#8C4FFF" stroke-width="1" rx="4"/>
+  <text x="1054" y="186" font-size="11" fill="#232F3E" font-weight="bold">Route 53 private hosted zone</text>
+  <text x="1054" y="206" font-size="11" fill="#5A6B78" font-family="monospace">userd.ecom.local      A  10.0.1.x ×3</text>
+  <text x="1054" y="223" font-size="11" fill="#5A6B78" font-family="monospace">productsd.ecom.local  A  10.0.1.x ×3</text>
+  <text x="1054" y="240" font-size="11" fill="#5A6B78" font-family="monospace">orderd.ecom.local     A  10.0.0.x</text>
+  <text x="1054" y="260" font-size="10.5" fill="#8C4FFF">records appear and vanish with the tasks</text>
+
+  <!-- ===== RDS ===== -->
+  <g>
+    <rect x="960" y="454" width="58" height="58" fill="#527FFF" rx="8"/>
+    <ellipse cx="989" cy="472" rx="16" ry="6" fill="none" stroke="#fff" stroke-width="2.2"/>
+    <path d="M973 472 v22 a16 6 0 0 0 32 0 v-22" fill="none" stroke="#fff" stroke-width="2.2"/>
+    <text x="989" y="530" font-size="11.5" fill="#232F3E" text-anchor="middle" font-weight="bold">RDS</text>
+    <text x="989" y="544" font-size="10.5" fill="#5A6B78" text-anchor="middle">db.t4g.micro</text>
+  </g>
+  <rect x="1040" y="450" width="330" height="106" fill="#F2F6FF" stroke="#527FFF" stroke-width="1" rx="4"/>
+  <text x="1054" y="470" font-size="11" fill="#232F3E" font-weight="bold">ONE instance · a DATABASE per service</text>
+  <text x="1054" y="490" font-size="11" fill="#5A6B78" font-family="monospace">database "userd"</text>
+  <text x="1054" y="507" font-size="11" fill="#5A6B78" font-family="monospace">database "productsd"</text>
+  <text x="1054" y="524" font-size="11" fill="#5A6B78" font-family="monospace">database "orderd"</text>
+  <text x="1054" y="544" font-size="10.5" fill="#527FFF">Single-AZ · created by the services at boot</text>
+
+  <!-- ===== supporting services ===== -->
+  <text x="352" y="630" font-size="12" fill="#232F3E" font-weight="bold">Used by the ECS agent BEFORE your code runs</text>
+
+  <g>
+    <rect x="352" y="648" width="46" height="46" fill="#ED7100" rx="7"/>
+    <path d="M365 662 h20 v20 h-20 z M365 670 h20" stroke="#fff" stroke-width="2" fill="none"/>
+    <text x="408" y="668" font-size="11.5" fill="#232F3E" font-weight="bold">ECR</text>
+    <text x="408" y="683" font-size="10.5" fill="#5A6B78">4 ARM64 images</text>
+  </g>
+  <g>
+    <rect x="352" y="706" width="46" height="46" fill="#DD344C" rx="7"/>
+    <path d="M375 718 a8 8 0 0 1 8 8 v4 h-16 v-4 a8 8 0 0 1 8 -8z M366 730 h18 v12 h-18z" fill="#fff"/>
+    <text x="408" y="726" font-size="11.5" fill="#232F3E" font-weight="bold">Secrets Manager</text>
+    <text x="408" y="741" font-size="10.5" fill="#5A6B78">JWT_SECRET · 3 × DB_URL</text>
+  </g>
+  <g>
+    <rect x="1230" y="648" width="46" height="46" fill="#E7157B" rx="7"/>
+    <path d="M1240 678 l9 -14 l7 8 l10 -16" stroke="#fff" stroke-width="2.4" fill="none"/>
+    <text x="1286" y="668" font-size="11.5" fill="#232F3E" font-weight="bold">CloudWatch Logs</text>
+    <text x="1286" y="683" font-size="10.5" fill="#5A6B78">/ecs/ecom-aws</text>
+  </g>
+  <g>
+    <rect x="1230" y="706" width="46" height="46" fill="#DD344C" rx="7"/>
+    <circle cx="1253" cy="722" r="7" fill="#fff"/>
+    <path d="M1241 744 a12 12 0 0 1 24 0z" fill="#fff"/>
+    <text x="1286" y="726" font-size="11.5" fill="#232F3E" font-weight="bold">IAM</text>
+    <text x="1286" y="741" font-size="10.5" fill="#5A6B78">execution role · task role (empty)</text>
+  </g>
+
+  <!-- ===== clients ===== -->
+  <g>
+    <circle cx="150" cy="300" r="20" fill="none" stroke="#232F3E" stroke-width="2.4"/>
+    <path d="M124 350 a26 30 0 0 1 52 0z" fill="none" stroke="#232F3E" stroke-width="2.4"/>
+    <text x="150" y="380" font-size="13" fill="#232F3E" text-anchor="middle" font-weight="bold">You</text>
+    <text x="150" y="398" font-size="11" fill="#5A6B78" text-anchor="middle">browser · Postman</text>
+    <text x="150" y="412" font-size="11" fill="#5A6B78" text-anchor="middle">curl · grpcurl</text>
+  </g>
+  <rect x="40" y="440" width="220" height="74" fill="#FFF7E6" stroke="#ED7100" stroke-width="1" rx="4"/>
+  <text x="54" y="461" font-size="11" fill="#232F3E" font-weight="bold">No ALB. No domain. No TLS.</text>
+  <text x="54" y="478" font-size="10.5" fill="#5A6B78">Each task gets a public IP;</text>
+  <text x="54" y="493" font-size="10.5" fill="#5A6B78">the security group allows ONE</text>
+  <text x="54" y="508" font-size="10.5" fill="#5A6B78">address — yours.</text>
+
+  <!-- ===== arrows ===== -->
+  <path d="M190 305 H352" stroke="#232F3E" stroke-width="1.8" fill="none" marker-end="url(#a)"/>
+  <text x="196" y="298" font-size="10.5" fill="#232F3E">REST :8080 · gRPC :5005x</text>
+
+  <path d="M410 322 H496" stroke="#232F3E" stroke-width="1.8" fill="none" marker-end="url(#a)"/>
+  <path d="M523 214 V160" stroke="none"/>
+  <path d="M550 187 H700" stroke="#232F3E" stroke-width="1.8" fill="none" marker-end="url(#a)"/>
+  <text x="570" y="180" font-size="10.5" fill="#232F3E">gRPC</text>
+
+  <path d="M727 214 V454 H700" stroke="#232F3E" stroke-width="2.2" fill="none" marker-end="url(#a)"/>
+  <text x="737" y="330" font-size="10.5" fill="#232F3E">CheckAvailability</text>
+  <path d="M700 200 H600 V454 H556" stroke="#232F3E" stroke-width="2.2" fill="none" marker-end="url(#a)"/>
+  <text x="566" y="330" font-size="10.5" fill="#232F3E">VerifyToken</text>
+
+  <path d="M870 200 H960" stroke="#879196" stroke-width="1.6" stroke-dasharray="5 4" fill="none" marker-end="url(#ag)"/>
+  <text x="872" y="193" font-size="10" fill="#879196">resolves</text>
+  <path d="M870 483 H960" stroke="#527FFF" stroke-width="1.8" fill="none" marker-end="url(#a)"/>
+  <text x="878" y="476" font-size="10" fill="#527FFF">SQL</text>
+
+  <path d="M398 671 H470 V250 H496" stroke="#879196" stroke-width="1.4" stroke-dasharray="4 4" fill="none" marker-end="url(#ag)"/>
+  <path d="M398 729 H450 V265 H496" stroke="#879196" stroke-width="1.4" stroke-dasharray="4 4" fill="none" marker-end="url(#ag)"/>
+
+  <text x="300" y="840" font-size="11.5" fill="#5A6B78">Task role is EMPTY: the services call no AWS API at runtime, so there is no access key anywhere.</text>
+  <text x="300" y="860" font-size="11.5" fill="#5A6B78">No NAT Gateway — public subnets instead. In production: private subnets plus VPC endpoints.</text>
+</svg>

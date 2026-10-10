@@ -9,7 +9,7 @@ LOCAL_AWS := AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGIO
              aws --endpoint-url http://localhost:4566
 
 .PHONY: local-up local-down tf-local-apply tf-local-destroy dns demo demo-load wait-ready \
-        scale test ps ps-aws aws-ip aws-env local-env tf-aws-apply tf-aws-destroy \
+        scale test ps ps-aws aws-ip aws-env local-env local-profile unset-profile seed-check tf-aws-apply tf-aws-destroy \
         forward forward-stop images images-push \
         api-coverage show-guard wire-size \
         demo-lb demo-lb-before demo-lb-after lb-report \
@@ -37,6 +37,31 @@ tf-local-apply:
 	@sleep 12
 	@$(MAKE) --no-print-directory dns
 	@$(MAKE) --no-print-directory wait-ready
+	@$(MAKE) --no-print-directory seed-check
+	@echo
+	@echo "Load the addresses and the local AWS profile into your shell:"
+	@echo "    eval \"\$$(make -s local-env)\"       # U, O, P, BASE, REST_BASE"
+	@echo "    eval \"\$$(make -s local-profile)\"   # aws CLI -> localhost:4566"
+
+
+# Did the services actually seed themselves? With postgres there is no baked-in
+# file, so each service creates its own database and loads the demo data at
+# boot (SEED_ON_BOOT=true). This reports what happened, rather than hoping.
+seed-check:
+	@drv=$$(docker inspect $$(docker ps --filter "name=ministack-ecs-.*-productsd$$" --format '{{.Names}}' | head -1) \
+		--format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep '^DB_DRIVER=' | cut -d= -f2); \
+	echo "db driver: $${drv:-sqlite (baked into the image)}"; \
+	if [ "$$drv" = "postgres" ]; then \
+		pg=$$(docker ps --format '{{.Names}}' | grep ministack-rds | head -1); \
+		if [ -n "$$pg" ]; then \
+			echo "databases: $$(docker exec $$pg psql -U ecom_app -d postgres -tAc \
+				"SELECT string_agg(datname, ', ' ORDER BY datname) FROM pg_database WHERE datname IN ('userd','productsd','orderd')" 2>/dev/null)"; \
+		fi; \
+		for svc in userd productsd; do \
+			c=$$(docker ps --filter "name=ministack-ecs-.*-$$svc$$" --format '{{.Names}}' | head -1); \
+			printf '%-11s %s\n' "$$svc" "$$(docker logs $$c 2>&1 | grep -o '"msg":"seeded[^}]*' | tail -1)"; \
+		done; \
+	fi
 
 # Blocks until orderd can actually reach userd and productsd. See the script -
 # the probe must exercise the real hop, not just check that DNS resolves.
@@ -122,7 +147,12 @@ tf-aws-apply:
 	@$(TF_AWS) apply -auto-approve
 	@echo "==> 5/5 waiting for four RUNNING tasks"
 	@bash scripts/aws-wait.sh
+	@echo "==> seeding (only with use_rds; SQLite ships already seeded in the image)"
+	@aws logs tail /ecs/ecom-aws --since 10m --filter-pattern "seeded" 2>/dev/null \
+		| sed 's/^/    /' | tail -4 || true
 	@$(MAKE) --no-print-directory aws-ip
+	@echo
+	@echo "Load the addresses into your shell:  eval \"\$$(make -s aws-env)\""
 
 # Tear it ALL down, and verify nothing is still billing.
 #
@@ -163,6 +193,28 @@ aws-ip:
 # the IPs move.
 aws-env:
 	@bash scripts/aws-endpoints.sh --env
+
+# Point the AWS CLI at the local emulator.
+#
+# NOTE ON WHY THIS PRINTS INSTEAD OF EXPORTING: make runs every recipe line in
+# its own subshell, so an `export` inside a target dies with that subshell and
+# your shell is unchanged. There is no way around that. So these targets emit
+# the assignments and you eval them:
+#
+#   eval "$$(make -s local-profile)"      # aws CLI -> localhost:4566
+#   eval "$$(make -s local-env)"          # U/O/P/BASE -> localhost
+#
+# Undo with: make -s unset-profile  (also eval'd)
+local-profile:
+	@echo "export AWS_ACCESS_KEY_ID=test"
+	@echo "export AWS_SECRET_ACCESS_KEY=test"
+	@echo "export AWS_DEFAULT_REGION=us-east-1"
+	@echo "export AWS_ENDPOINT_URL=http://localhost:4566"
+
+# Clear them again. Do this BEFORE touching real AWS, or every command keeps
+# going to your laptop and you will think nothing deployed.
+unset-profile:
+	@echo "unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_ENDPOINT_URL"
 
 # The same variables for the LOCAL stack, so every command in INSTRUCTIONS.md
 # works in both places without editing anything:
@@ -228,11 +280,25 @@ scale:
 		--cluster ecom-local --services $(SCALE_SVC) \
 		--query 'services[0].{Service:serviceName,Desired:desiredCount,Running:runningCount}' --output table
 
-# Terraform refuses to scale the one service that writes.
+# Terraform refuses to scale the one service that writes - but ONLY when its
+# database lives on the task filesystem.
+#
+# -var use_rds=false is required here, and that is the point rather than a
+# workaround: with a shared database the restriction does not apply, so the
+# guard lifts itself. Local now defaults to use_rds=true, so without this flag
+# the plan simply succeeds and there is nothing to show.
 show-guard:
-	-@terraform -chdir=terraform/envs/local plan -var order_desired_count=3 -no-color 2>&1 \
-		| grep -A8 "Invalid value for variable"
-
+	@echo "With SQLite on the task filesystem, 3 orderd tasks = 3 divergent databases:"
+	@echo
+	-@$(TF) plan -var use_rds=false -var order_desired_count=3 -no-color 2>&1 \
+		| grep -A8 "Invalid value for variable" \
+		| sed 's/^/  /'
+	@echo
+	@echo "Now with a shared database, the same plan is allowed:"
+	@echo
+	@$(TF) plan -var use_rds=true -var order_desired_count=3 -no-color >/dev/null 2>&1 \
+		&& echo "  accepted - orderd can scale when the three services share one instance." \
+		|| echo "  (plan failed for some other reason)"
 
 # ---- codegen: ONE proto, Go + TypeScript ----
 # Generated code is committed, so a clone builds without buf installed.

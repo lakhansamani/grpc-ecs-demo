@@ -10,103 +10,72 @@ If you only read one thing, read [the request path](#the-request-path).
 
 ## The diagram
 
-GitHub renders Mermaid, so this is the version that works everywhere. The
-official AWS icons are in the free
-[AWS Architecture Icons deck](https://aws.amazon.com/architecture/icons/) —
-use those for the slide; the shapes below map one-to-one onto them.
+Drawn with box characters inside a code block, on purpose: it renders
+identically on GitHub, in Marp, in a terminal and in a PDF export, with no
+plugin and no screenshot step. If you want a polished version for a slide, the
+free [AWS Architecture Icons deck](https://aws.amazon.com/architecture/icons/)
+has an icon for every box below.
 
-```mermaid
-graph TB
-    subgraph internet["🌐 Internet"]
-        client["Browser / Postman / curl"]
-        operator["Operator laptop"]
-    end
+![AWS architecture](images/architecture.svg)
 
-    subgraph aws["☁️ AWS · us-east-1"]
-        ecr[("📦 ECR<br/>4 repositories<br/>ARM64 images")]
-        sm["🔑 Secrets Manager<br/>ecom-aws-jwt-secret"]
-        cw["📊 CloudWatch Logs<br/>/ecs/ecom-aws"]
-        iam["👤 IAM<br/>execution role · task role"]
+<details>
+<summary>The same thing as text, if the image will not render</summary>
 
-        subgraph vpc["VPC 10.0.0.0/16 · DNS hostnames on"]
-            igw["🚪 Internet Gateway"]
-            cmap["🧭 Cloud Map / Route 53<br/>private hosted zone<br/><b>ecom.local</b>"]
-
-            subgraph cluster["⚙️ ECS Cluster · ecom-aws · Fargate"]
-                subgraph az1["Availability Zone A · subnet 10.0.0.0/24"]
-                    gw1["gatewayd task<br/>:8080 REST"]
-                    u1["userd task<br/>:50051"]
-                    o1["orderd task<br/>:50052 · desired=1"]
-                end
-                subgraph az2["Availability Zone B · subnet 10.0.1.0/24"]
-                    u2["userd task<br/>:50051"]
-                    u3["userd task<br/>:50051"]
-                    p1["productsd task<br/>:50053"]
-                end
-            end
-        end
-    end
-
-    subgraph obs["Observability"]
-        jaeger["Jaeger · traces"]
-        prom["Prometheus · :909x/metrics"]
-    end
-
-    client -->|"HTTPS/JSON"| igw
-    operator -.->|"SSM port forward<br/>no public IP needed"| gw1
-    igw --> gw1
-
-    gw1 -->|gRPC| u1
-    gw1 -->|gRPC| p1
-    gw1 -->|gRPC| o1
-
-    o1 ==>|"gRPC VerifyToken<br/>dns:/// + round_robin"| u1
-    o1 ==> u2
-    o1 ==> u3
-    o1 -->|"gRPC CheckAvailability"| p1
-
-    cmap -.->|"A records, one per<br/>healthy task"| o1
-    u1 -.->|register / deregister| cmap
-    u2 -.-> cmap
-    u3 -.-> cmap
-
-    ecr -.->|"image pull<br/>(execution role)"| cluster
-    sm -.->|"JWT_SECRET injected<br/>(execution role)"| cluster
-    iam -.-> cluster
-    cluster -.->|stdout/stderr| cw
-    cluster -.-> jaeger
-    cluster -.-> prom
-
-    classDef task fill:#2E7D8C,stroke:#1a4d57,color:#fff
-    classDef svc fill:#E8633A,stroke:#a8431f,color:#fff
-    class gw1,u1,u2,u3,o1,p1 task
-    class ecr,sm,cw,iam,cmap,igw svc
 ```
+  you ──REST :8080 / gRPC :5005x──▶ [public task IP, one allow-listed /32]
+                                      no ALB · no domain · no TLS
+
+  AWS · us-east-1
+  └─ VPC 10.0.0.0/16   (enable_dns_hostnames = true, Cloud Map needs it)
+     ├─ AZ a  10.0.0.0/24   gatewayd :8080      orderd :50052  ×1  (writes)
+     ├─ AZ b  10.0.1.0/24   userd :50051 ×3     productsd :50053 ×3 (reads)
+     │
+     ├─ Cloud Map  ecom.local   -> a Route 53 PRIVATE hosted zone
+     │    userd.ecom.local      A  10.0.1.x ×3
+     │    productsd.ecom.local  A  10.0.1.x ×3
+     │    orderd.ecom.local     A  10.0.0.x
+     │
+     └─ RDS db.t4g.micro, Single-AZ   ONE instance, a DATABASE per service:
+          userd · productsd · orderd
+
+  Resolved by the EXECUTION role before your code starts:
+     ECR -> image pull        Secrets Manager -> JWT_SECRET + 3 x DB_URL
+  CloudWatch Logs <- stdout   TASK role is EMPTY: no AWS calls at runtime
+```
+
+</details>
 
 ### The request path
 
 A single `POST /v1/orders` with a bearer token:
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as Browser
-    participant G as gatewayd<br/>(REST→gRPC)
-    participant O as orderd
-    participant U as userd
-    participant P as productsd
-
-    C->>G: POST /v1/orders  {items, idempotencyKey}
-    Note over G: generated from the .proto<br/>by grpc-gateway — not hand-written
-    G->>O: CreateOrder (gRPC, authorization metadata forwarded)
-    O->>U: VerifyToken  ← resolved via ecom.local, balanced round_robin
-    U-->>O: User{id, name, email}
-    O->>P: CheckAvailability  ← internal only, no REST route
-    P-->>O: price + stock per item
-    Note over O: total computed from CATALOGUE prices.<br/>The request carries no price field at all.
-    O->>O: persist order (SQLite on the task filesystem)
-    O-->>G: Order{status: CONFIRMED, total}
-    G-->>C: 200 {order}
+```
+  POST /v1/orders            Authorization: Bearer <jwt>
+  { items:[{productId,quantity}], idempotencyKey }
+        │
+        ▼
+  ┌──────────────┐
+  │  gatewayd    │   generated by grpc-gateway from the protos
+  └──────┬───────┘
+         │ gRPC  CreateOrder   (authorization forwarded as metadata)
+         ▼
+  ┌──────────────┐
+  │  orderd      │
+  └──┬────────┬──┘
+     │        │
+     │        └──▶ userd.VerifyToken          "who is this?"
+     │               ◀── User{id, name, email}
+     │
+     └───────────▶ productsd.CheckAvailability  "price + stock"
+                     ◀── per-item price, stock, availability
+         │
+         │  total computed from CATALOGUE prices only.
+         │  The request carried NO price field.
+         ▼
+     persist  ─▶  RDS database "orderd"   (or SQLite on the task)
+         │
+         ▼
+   200  { order: { status: CONFIRMED, totalMinor, lines[] } }
 ```
 
 Two things to say out loud about this diagram:
@@ -416,6 +385,73 @@ apply with the same name.
 
 ---
 
+### RDS — one instance, a separate database per service
+
+**What it is.** Managed PostgreSQL: AWS runs the engine, the backups and the
+failover, you get an endpoint.
+
+**Why it is here.** Without it, each service keeps SQLite on its own task
+filesystem — which is why `orderd` is pinned to one task, because three tasks
+would mean three divergent databases. With it, `orderd` scales like anything
+else. `use_rds = true` is the switch; it is **off by default on AWS** because it
+bills, and **on by default locally** because the emulator runs a plain Postgres
+container for free.
+
+**How it is used.** One `db.t4g.micro`, Single-AZ, 20 GiB gp3 — the cheapest
+current-generation class, and the 20 GiB is the gp3 minimum rather than a
+choice. Three databases on it, one per service, so there are no shared tables
+and no accidental cross-service join:
+
+```
+db.t4g.micro "ecom-aws"
+  ├── database "userd"       users
+  ├── database "productsd"   products  (+ the tsvector search index)
+  └── database "orderd"      orders, order_lines
+```
+
+**Terraform does not create those databases, and cannot.** `CREATE DATABASE` is
+SQL, and the AWS provider only speaks the AWS API. The alternatives were a
+second Terraform provider that would have to reach the instance over the
+network — it cannot, the instance is not publicly accessible — or a one-off
+migration task, which is another moving part. So the instance comes up with
+only the `postgres` maintenance database and **each service creates its own at
+boot**, in `internal/platform/store/ensuredb.go`.
+
+That has to be safe when three `userd` tasks boot together, and Postgres raises
+**two** different errors for the race:
+
+| SQLSTATE | Means |
+|---|---|
+| `42P04` | the database already existed when `CREATE` ran |
+| `23505` | two `CREATE DATABASE` statements raced; this one lost on `pg_database_datname_index` |
+
+Handling only `42P04` passes every sequential test and then fails exactly when
+tasks boot together. Both are treated as success.
+
+**The password never becomes an environment variable.** The module builds a DSN
+per service and stores each as a Secrets Manager secret; the task definition
+references the ARN, and the execution role resolves it into `DB_URL` at task
+start. So the value stays out of task definitions, out of `terraform output`,
+and off your screen.
+
+**Three settings exist only so `destroy` actually stops the bill**, and getting
+any of them wrong means paying after the talk:
+
+| Setting | Without it |
+|---|---|
+| `skip_final_snapshot = true` | destroy leaves a snapshot you keep paying for |
+| `deletion_protection = false` | destroy fails outright |
+| `backup_retention_period = 0` | backup storage accrues |
+
+Also off for cost: Multi-AZ (doubles the instance), Performance Insights, and
+enhanced monitoring. **None of that is a production setting** — a real
+deployment wants Multi-AZ, backups on, and deletion protection on.
+
+**Search differs by engine, and genuinely so.** SQLite uses an FTS5 virtual
+table with bm25 ranking; Postgres uses a `STORED` generated `tsvector` column
+with a GIN index and `ts_rank`, so the database maintains the index itself on
+every write. Same RPC, same input sanitiser, same prefix-match behaviour.
+
 ### CloudWatch Logs
 
 **What it is.** AWS's log store. Groups contain streams; streams contain lines.
@@ -511,7 +547,7 @@ is a separate, empty-by-default rule locked to the operator's `/32`.
 | Missing | Why |
 |---|---|
 | **ALB** | a gRPC target group needs an **HTTPS listener plus an ACM certificate**, which means a domain. Above the cut line for a 40-minute talk. Cloud Map covers the internal hops; `gatewayd` is the one thing an ALB belongs in front of, and that is a slide, not a demo |
-| **RDS** | adds 5–10 minutes to every apply, and bills by the hour if you forget to destroy it. Dropping it takes the AWS apply from ~10 minutes to **~2**. For anything real, use RDS: `DB_DRIVER=postgres` plus a DSN in `DB_URL` is the whole application-side switch |
+| **RDS, by default on AWS** | it bills, and adds 5–10 minutes to the apply. `use_rds = true` turns it on; it is **on by default locally**, where it is free. Leaving it off takes the AWS apply from ~10 minutes to **~2**. For anything real, use RDS: `DB_DRIVER=postgres` plus a DSN in `DB_URL` is the whole application-side switch |
 | **EFS for the SQLite file** | SQLite's own documentation warns that network filesystems cause **database corruption**. Not a cost decision — a correctness one |
 | **NAT Gateway** | see above |
 | **Container Insights** | costs money per metric; Prometheus and Jaeger cover the demo |

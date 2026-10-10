@@ -10,6 +10,7 @@ Copy-paste commands for poking every API by hand — locally, and on real AWS
 - [5. Against real AWS, by IP](#5-against-real-aws-by-ip)
 - [6. Postman](#6-postman)
 - [7. Seeded data and deliberate failures](#7-seeded-data-and-deliberate-failures)
+- [8. Which database am I actually on?](#8-which-database-am-i-actually-on)
 
 ---
 
@@ -225,7 +226,9 @@ grpcurl -plaintext -d '{"service":"orderd"}'    $O grpc.health.v1.Health/Check
 ### Browse — the read path, no auth
 
 ```sh
-# full-text search (FTS5 on sqlite, tsvector + ts_rank on postgres)
+# full-text search. Two genuinely different implementations behind one RPC:
+#   sqlite   -> FTS5 virtual table, bm25 ranking
+#   postgres -> STORED generated tsvector + GIN index, ts_rank ranking
 grpcurl -plaintext -d '{"query":"cancelling"}' \
   $P product.v1.ProductService/SearchProducts
 
@@ -511,3 +514,60 @@ Three products exist to make failures reproducible without editing data:
 > task, so two of three tasks have never heard of them — and it fails looking
 > exactly like a load-balancing bug. With `use_rds = true` the services share a
 > database and this stops mattering.
+
+---
+
+## 8. Which database am I actually on?
+
+`use_rds` is **on by default locally** (the emulator runs a Postgres container,
+so it is free) and **off by default on AWS** (there it bills, ~6¢ for a
+three-hour demo).
+
+```sh
+# locally
+docker exec $(docker ps --filter "name=ministack-ecs-.*-orderd$" --format '{{.Names}}' | head -1) \
+  /healthcheck -addr localhost:50052 -service orderd      # just proves it is up
+
+# the authoritative answer, either environment:
+aws ecs describe-task-definition --task-definition orderd \
+  --query 'taskDefinition.containerDefinitions[0].environment[?name==`DB_DRIVER`].value' --output text
+# -> postgres   (or empty, which means sqlite)
+```
+
+With Postgres, the services create their own databases at boot and seed
+themselves — there is no migration step to run. Prove it:
+
+```sh
+# locally - the emulated instance is a real postgres container
+PG=$(docker ps --format '{{.Names}}' | grep ministack-rds | head -1)
+docker exec "$PG" psql -U ecom_app -d postgres \
+  -tAc "SELECT datname FROM pg_database WHERE datname IN ('userd','productsd','orderd') ORDER BY 1"
+# -> orderd / productsd / userd
+
+# the seeding, in the logs
+docker logs $(docker ps --filter "name=ministack-ecs-.*-productsd$" --format '{{.Names}}' | head -1) \
+  2>&1 | grep seeded
+# -> {"msg":"seeded catalogue","products":12}
+```
+
+On AWS:
+
+```sh
+aws rds describe-db-instances \
+  --query 'DBInstances[].{Id:DBInstanceIdentifier,Class:DBInstanceClass,MultiAZ:MultiAZ}' --output table
+aws secretsmanager list-secrets --query 'SecretList[].Name' --output text
+# -> one <name>-<service>-db-url secret per service. The DSN holds a password,
+#    so it is a SECRET, resolved by the execution role - never an env var.
+aws logs tail /ecs/ecom-aws --since 10m --filter-pattern "seeded"
+```
+
+### Switching shapes
+
+```sh
+# SQLite on the task (orderd pinned to 1, fastest to stand up)
+terraform -chdir=terraform/envs/local apply -auto-approve -var use_rds=false
+
+# shared Postgres (orderd scales)
+terraform -chdir=terraform/envs/local apply -auto-approve -var use_rds=true
+make dns && make wait-ready
+```

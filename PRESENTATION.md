@@ -1,12 +1,23 @@
 ---
 marp: true
+theme: default
 paginate: true
 title: Running Go gRPC Services on ECS
+style: |
+  section { font-size: 24px; }
+  section.lead h1 { font-size: 52px; }
+  h1 { font-size: 40px; }
+  h2 { font-size: 32px; color: #232F3E; }
+  table { font-size: 19px; }
+  pre, code { font-size: 18px; }
+  blockquote { border-left: 4px solid #ED7100; padding-left: 14px; color: #44525c; }
+  img { max-height: 70vh; }
 ---
 
 <!--
 Plain markdown. Reads fine on GitHub as a document.
-To project it:  npx @marp-team/marp-cli PRESENTATION.md -o slides.html
+To project it:  npx @marp-team/marp-cli@latest -w -s .
+                (full commands are in the appendix at the end)
 
 DIAGRAMS: the two Mermaid blocks render on GitHub. Marp does NOT render
 Mermaid. Either present slides 6 and 25 from the GitHub tab, or screenshot
@@ -129,45 +140,30 @@ It is a story about **what it costs you**:
 
 ## The overall picture
 
-```mermaid
-graph LR
-    subgraph who["Who uses it"]
-        shopper["Shopper<br/>(browser / app)"]
-        ops["You<br/>(terraform)"]
-    end
+```
+            WHO USES IT                      WHAT THEY DO                 WHICH SERVICE
+  ┌──────────────────────────┐
+  │  Shopper                 │          ┌─ search the catalogue ──────┐
+  │  (browser / mobile app)  │ ────────▶├─ open a product page ───────┼──▶  productsd   READS
+  └──────────────────────────┘          └─ compare, scroll, filter ───┘      (3 copies)   ▲
+               │                                                                          │
+               │                        ┌─ log in ────────────────────┐                   │ scale
+               ├───────────────────────▶└─ see my profile ────────────┼──▶  userd        │ freely
+               │                                                                          │
+               │                        ┌─ place an order ────────────┐
+               └───────────────────────▶└─────────────────────────────┼──▶  orderd      WRITES
+                                                                                          │
+                                           orderd must then ask:                          │ 1 copy
+                                             "who is this?"        ──▶ userd              ▼
+                                             "what does it cost?"  ──▶ productsd
 
-    subgraph reads["READ path - scales freely"]
-        browse["Search and browse<br/>the catalogue"]
-        login["Log in"]
-    end
-
-    subgraph writes["WRITE path"]
-        order["Place an order"]
-    end
-
-    shopper --> browse
-    shopper --> login
-    shopper --> order
-
-    browse --> productsd["productsd"]
-    login --> userd["userd"]
-    order --> orderd["orderd"]
-
-    orderd -->|"who is this?"| userd
-    orderd -->|"what does it cost?<br/>is it in stock?"| productsd
-
-    ops -->|"one pipeline:<br/>laptop AND prod"| infra["ECS + Fargate"]
-    infra -.-> productsd
-    infra -.-> userd
-    infra -.-> orderd
-
-    classDef r fill:#2E7D8C,stroke:#1a4d57,color:#fff
-    classDef w fill:#E8633A,stroke:#a8431f,color:#fff
-    class browse,login,productsd,userd r
-    class order,orderd w
+  ┌──────────────────────────┐
+  │  You                     │      ONE set of terraform modules
+  │  (terraform)             │ ───▶  ├─▶ your laptop   (emulator)
+  └──────────────────────────┘       └─▶ real AWS      (Fargate)
 ```
 
-Teal reads. Orange writes. **They do not grow at the same rate.**
+**Reads and writes do not grow at the same rate.** That is the whole argument.
 
 ---
 
@@ -519,43 +515,12 @@ image** — your base image, your packages, your CVEs.
 
 # Part 5 · The code
 
-## Three services, one contract
+## The architecture, on AWS
 
-```mermaid
-graph TB
-    client["Browser / Postman / curl"]
+![Architecture](docs/images/architecture.svg)
 
-    subgraph vpc["VPC"]
-        gw["gatewayd :8080<br/>REST to gRPC<br/>generated, stores nothing"]
-
-        subgraph svc["ECS services"]
-            u["userd :50051<br/>accounts, JWT<br/>3 tasks"]
-            p["productsd :50053<br/>search + catalogue<br/>3 tasks"]
-            o["orderd :50052<br/>places orders<br/>1 task"]
-        end
-
-        cm["Cloud Map<br/>ecom.local<br/>names to task IPs"]
-    end
-
-    client -->|"REST/JSON"| gw
-    client -->|"gRPC"| o
-    gw -->|gRPC| u
-    gw -->|gRPC| p
-    gw -->|gRPC| o
-    o ==>|"VerifyToken"| u
-    o ==>|"CheckAvailability"| p
-    cm -.->|resolves| o
-
-    classDef s fill:#2E7D8C,stroke:#1a4d57,color:#fff
-    classDef g fill:#E8633A,stroke:#a8431f,color:#fff
-    class u,p,o s
-    class gw,cm g
-```
-
-**Nobody in this diagram knows anybody's IP address.** They dial names.
-
-> **Show:** `internal/order/service.go` — `CreateOrder`, the two hops, and the
-> total computed from catalogue prices
+**Nobody in this diagram knows anybody's IP address.** They dial names, and
+Cloud Map answers.
 
 ---
 
@@ -640,29 +605,70 @@ clients branch on a value — never on an error string.
 
 ---
 
-## One honest note on copies
+## Why one service has one copy
 
-`userd` and `productsd` run 3 copies because their database is **baked into the
-image** — every copy is identical, so any copy can answer any read.
+Two storage shapes, and the shape decides the count.
 
-`orderd` runs **1**, and I want to be precise about why, because I used to say
-this badly:
+| | Where its data lives | Copies |
+|---|---|---|
+| `userd`, `productsd` | **SQLite baked into the image** — every copy identical, so any copy answers any read | **3** |
+| `orderd` | **SQLite in the task filesystem** — it writes | **1** |
+
+I want to be precise about why, because it is easy to say badly:
 
 > **Not** "because it writes". Writers scale fine.
 >
 > **Because it writes to a file inside the task.** Three copies would be three
 > different databases.
 
-> **Show:** `build/Dockerfile.seeded` vs `build/Dockerfile.stateful` — one per
-> storage shape, not per service
+**So give it a real database and it scales like the others.** That is one
+variable:
 
-**Give it a managed database and `orderd` scales like the others.** SQLite on
-the task is a demo shortcut that keeps the AWS deploy at ~2 minutes instead of
-~10. Terraform refuses to scale it, so the shortcut cannot bite by accident:
+```sh
+terraform apply -var use_rds=true     # one db.t4g.micro, a database per service
+```
 
 ```sh
 make show-guard
 ```
+
+Terraform **refuses** `orderd` at 3 tasks while it is on SQLite, and **accepts**
+it once the services share an instance. The guard lifts itself.
+
+> **Show:** `build/Dockerfile.seeded` vs `build/Dockerfile.stateful` — one
+> Dockerfile per storage shape, not per service.
+
+---
+
+## And with RDS, it is one instance per deployment — not one per service
+
+```
+db.t4g.micro "ecom-aws"
+  ├── database "userd"       users
+  ├── database "productsd"   products + the search index
+  └── database "orderd"      orders, order_lines
+```
+
+Separate **databases**, one **instance**. No shared tables, no accidental
+cross-service join, each one dumpable on its own — and you pay for one
+instance.
+
+**Terraform does not create those databases, and cannot:** `CREATE DATABASE` is
+SQL, and the AWS provider only speaks the AWS API. So each service creates its
+own at boot and seeds itself.
+
+Which has to be safe when three tasks boot together — and Postgres raises
+**two** different errors for that race:
+
+| | |
+|---|---|
+| `42P04` | it already existed when `CREATE` ran |
+| `23505` | two `CREATE DATABASE` statements raced, and this one lost |
+
+Handling only the first passes every sequential test, then fails exactly when
+three tasks start at once.
+
+> **Show:** `internal/platform/store/ensuredb.go`
 
 ---
 
@@ -722,8 +728,9 @@ gRPC services and the HTTP gateway come out of the **same module**.
 `terraform destroy` on this reported **45 destroyed**.
 
 The table is the ones worth naming — it leaves out the IAM policy attachments
-and the generated password. **No NAT Gateway, no ALB, and no RDS unless you ask
-for it** — each absence deliberate.
+and the generated password. **No NAT Gateway and no ALB**, deliberately. RDS is
+one variable away — `use_rds = true` adds the instance plus three DSN secrets,
+and is on by default locally where the emulator provides it free.
 
 > **Show:** `terraform/modules/network/main.tf` (the self-referencing SG rule)
 > and `terraform/modules/rds/main.tf` (the cost arithmetic in the header)
@@ -1048,7 +1055,8 @@ make forward           # publish ports (awsvpc tasks have no host port)
 AWS minus the last line:
 
 ```sh
-export AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test
+export AWS_ACCESS_KEY_ID=test
+export AWS_SECRET_ACCESS_KEY=test
 export AWS_DEFAULT_REGION=us-east-1
 export AWS_ENDPOINT_URL=http://localhost:4566
 ```
@@ -1493,6 +1501,42 @@ make demo          # the whole flow
 ---
 
 # Appendix · Command reference
+
+## Showing these slides
+
+Marp turns this file into slides. Nothing to install — `npx` fetches it.
+
+```sh
+# live preview in a browser, reloads as you edit  <- use this on the day
+npx @marp-team/marp-cli@latest -w -s .
+
+# or a single self-contained HTML file
+npx @marp-team/marp-cli@latest PRESENTATION.md -o slides.html --allow-local-files
+
+# PDF, as a backup on a USB stick
+npx @marp-team/marp-cli@latest PRESENTATION.md --pdf --allow-local-files
+
+# PowerPoint, if the venue insists
+npx @marp-team/marp-cli@latest PRESENTATION.md --pptx --allow-local-files
+```
+
+**`--allow-local-files` is required** for PDF and PPTX, because the
+architecture diagram is a local SVG. Without it the slide renders blank.
+
+The theme is `default` — Marp's light one — with a small `style:` block in the
+front matter to size the tables and code down. The other built-ins are `gaia`
+and `uncover`:
+
+```sh
+npx @marp-team/marp-cli@latest PRESENTATION.md --theme gaia -o slides.html
+```
+
+> Install it properly if you would rather not wait for `npx` on venue wifi:
+> `npm i -g @marp-team/marp-cli`, then just `marp -w -s .`
+>
+> There is also a **Marp for VS Code** extension, which previews in the editor.
+
+---
 
 ## Every `make` target, grouped by what you are doing
 
