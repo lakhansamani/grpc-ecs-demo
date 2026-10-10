@@ -26,6 +26,11 @@ local-down:
 
 # Always re-alias after an apply: new task containers, new container ids, so
 # the previous aliases are gone with the old containers.
+# RDS is ON by default locally (an emulated postgres container, so it is free),
+# which makes the local demo the same shape as the AWS one: one instance, a
+# separate database per service, DSNs injected from Secrets Manager.
+#   make tf-local-apply                      # with postgres
+#   $(TF) apply -auto-approve -var use_rds=false   # the SQLite shape instead
 tf-local-apply:
 	$(TF) init -upgrade
 	$(TF) apply -auto-approve

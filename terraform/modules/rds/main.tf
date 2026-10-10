@@ -69,6 +69,19 @@ variable "username" {
   type    = string
   default = "ecom_app"
 }
+# Real RDS terminates TLS, so require it there. The local emulator runs a
+# plain postgres container with no TLS, so the same DSN would fail to connect -
+# this is one of the few genuine local/AWS differences, and it is one variable.
+variable "sslmode" {
+  type    = string
+  default = "require"
+
+  validation {
+    condition     = contains(["require", "disable", "prefer", "verify-full"], var.sslmode)
+    error_message = "sslmode must be one of require, disable, prefer, verify-full."
+  }
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
@@ -165,11 +178,12 @@ resource "aws_secretsmanager_secret_version" "db_url" {
   for_each  = toset(var.databases)
   secret_id = aws_secretsmanager_secret.db_url[each.key].id
   secret_string = format(
-    "postgres://%s:%s@%s/%s?sslmode=require",
+    "postgres://%s:%s@%s/%s?sslmode=%s",
     var.username,
     urlencode(random_password.db.result),
     aws_db_instance.this.endpoint,
     each.key,
+    var.sslmode,
   )
 }
 

@@ -20,11 +20,16 @@ variable "product_desired_count" {
 
 # `-var lb_policy=pick_first` redeploys orderd with the bug, so the
 # load-balancing segment has a "before" to show. See ../../deployment/main.tf.
-# RDS is off by default so an accidental apply never creates a billable
-# database. See ../../modules/rds for the cost arithmetic.
+# ON by default locally. The emulator runs a plain postgres container, so it
+# costs nothing, and it means the local demo exercises the SAME shape as the
+# AWS one: one instance, a separate database per service, DSNs injected from
+# Secrets Manager.
+#
+# Set -var use_rds=false for the SQLite shape, which is faster to stand up and
+# is what the "orderd cannot scale" guard is about.
 variable "use_rds" {
   type    = bool
-  default = false
+  default = true
 }
 
 variable "lb_policy" {
@@ -51,6 +56,8 @@ module "deployment" {
   order_desired_count   = var.order_desired_count
   lb_policy             = var.lb_policy
   use_rds               = var.use_rds
+  # The emulator's postgres container speaks no TLS.
+  db_sslmode            = "disable"
   gateway_desired_count = 1
 
   # jaeger from compose.yaml, reachable because Ministack places task

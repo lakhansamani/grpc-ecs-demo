@@ -72,8 +72,10 @@ variable "enable_execute_command" {
   default = true
 }
 
-# RDS is off by default so an accidental apply never creates a billable
-# database. See ../../modules/rds for the cost arithmetic.
+# OFF by default here, unlike envs/local, because on real AWS this one bills:
+# a db.t4g.micro plus 20 GiB gp3 is ~$14/month if left running, or about six
+# cents for a three-hour demo. Turn it on in terraform.tfvars or with
+# -var use_rds=true. See ../../modules/rds for the arithmetic.
 variable "use_rds" {
   type    = bool
   default = false

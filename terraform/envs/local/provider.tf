@@ -29,8 +29,14 @@ provider "aws" {
   skip_region_validation      = true
   s3_use_path_style           = true
 
+  # EVERY service the stack touches must be listed here. A service that is
+  # MISSING does not fail loudly - the call goes to REAL AWS instead. Found by
+  # turning on use_rds locally: the apply tried to create a real DB subnet
+  # group and only failed because the fake credentials were rejected. With real
+  # credentials in the environment it would have succeeded.
   endpoints {
     ec2              = "http://localhost:4566"
+    rds              = "http://localhost:4566"
     ecs              = "http://localhost:4566"
     ecr              = "http://localhost:4566"
     elbv2            = "http://localhost:4566"

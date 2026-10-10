@@ -111,6 +111,13 @@ variable "use_rds" {
   default = false
 }
 
+# The emulator's postgres has no TLS; real RDS does. One variable, set per
+# environment - the same shape as the provider block itself.
+variable "db_sslmode" {
+  type    = string
+  default = "require"
+}
+
 variable "jwt_secret_plain" {
   type        = string
   default     = ""
@@ -205,6 +212,7 @@ module "rds" {
   subnet_ids               = module.network.subnet_ids
   client_security_group_id = module.network.security_group_id
   databases                = ["userd", "productsd", "orderd"]
+  sslmode                  = var.db_sslmode
   tags                     = local.tags
 }
 
