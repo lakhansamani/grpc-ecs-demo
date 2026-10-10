@@ -11,7 +11,7 @@ LOCAL_AWS := AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGIO
 .PHONY: local-up local-down tf-local-apply tf-local-destroy dns demo demo-load wait-ready \
         scale test ps ps-aws aws-ip aws-env local-env local-profile unset-profile seed-check tf-aws-apply tf-aws-destroy \
         forward forward-stop images images-push \
-        api-coverage show-guard wire-size \
+        api-coverage show-guard wire-size slides slides-html slides-pdf \
         demo-lb demo-lb-before demo-lb-after lb-report \
         proto proto-breaking ts-demo
 
@@ -299,6 +299,27 @@ show-guard:
 	@$(TF) plan -var use_rds=true -var order_desired_count=3 -no-color >/dev/null 2>&1 \
 		&& echo "  accepted - orderd can scale when the three services share one instance." \
 		|| echo "  (plan failed for some other reason)"
+
+# ---- the slides ----
+#
+# Port 8030, NOT marp's default 8080 - gatewayd already listens on 8080, so
+# the two would fight and you would get whichever bound first.
+#
+# marp-cli has no --port flag; server mode reads the PORT environment variable.
+SLIDES_PORT ?= 8030
+slides:
+	@echo "slides on http://localhost:$(SLIDES_PORT)  (live reload; Ctrl-C to stop)"
+	@PORT=$(SLIDES_PORT) npx --yes @marp-team/marp-cli@latest -w -s .
+
+# One self-contained file. --allow-local-files is REQUIRED: the diagrams are
+# local SVGs, and without it those slides render blank.
+slides-html:
+	@npx --yes @marp-team/marp-cli@latest PRESENTATION.md -o slides.html --allow-local-files
+	@echo "wrote slides.html"
+
+slides-pdf:
+	@npx --yes @marp-team/marp-cli@latest PRESENTATION.md --pdf --allow-local-files
+	@echo "wrote PRESENTATION.pdf"
 
 # ---- codegen: ONE proto, Go + TypeScript ----
 # Generated code is committed, so a clone builds without buf installed.

@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1260 600" width="1260" height="600" font-family="Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#1D8102"/></marker>
+    <marker id="o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#D13212"/></marker>
+    <marker id="d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#5A6B78"/></marker>
+  </defs>
+  <rect width="1260" height="600" fill="#fff"/>
+
+  <!-- shopper -->
+  <circle cx="92" cy="210" r="24" fill="none" stroke="#232F3E" stroke-width="2.6"/>
+  <path d="M58 272 a34 38 0 0 1 68 0z" fill="none" stroke="#232F3E" stroke-width="2.6"/>
+  <text x="92" y="300" font-size="17" font-weight="bold" fill="#232F3E" text-anchor="middle">Shopper</text>
+
+  <!-- READ lane -->
+  <rect x="220" y="60" width="520" height="190" rx="10" fill="#F0FAF2" stroke="#1D8102" stroke-width="2"/>
+  <text x="244" y="90" font-size="16" font-weight="bold" fill="#1D8102">READ PATH — huge, spiky, safe to copy</text>
+  <text x="244" y="124" font-size="19" fill="#232F3E">Search “headphones under 2000”</text>
+  <text x="244" y="156" font-size="19" fill="#232F3E">Scroll, compare, open a product page</text>
+  <text x="244" y="188" font-size="19" fill="#232F3E">Log in</text>
+  <text x="244" y="224" font-size="15" fill="#5A6B78">happens constantly · writes nothing</text>
+
+  <!-- WRITE lane -->
+  <rect x="220" y="310" width="520" height="150" rx="10" fill="#FDF2F0" stroke="#D13212" stroke-width="2"/>
+  <text x="244" y="340" font-size="16" font-weight="bold" fill="#D13212">WRITE PATH — small, and it writes</text>
+  <text x="244" y="378" font-size="19" fill="#232F3E">Actually place the order</text>
+  <text x="244" y="414" font-size="15" fill="#5A6B78">happens far less often</text>
+  <text x="244" y="440" font-size="15" fill="#5A6B78">copies of a writer = divergent data</text>
+
+  <path d="M132 190 C 180 150, 180 140, 220 140" stroke="#1D8102" stroke-width="2.4" fill="none" marker-end="url(#g)"/>
+  <path d="M132 250 C 180 330, 180 360, 220 375" stroke="#D13212" stroke-width="2.4" fill="none" marker-end="url(#o)"/>
+
+  <!-- services -->
+  <g>
+    <rect x="820" y="72" width="56" height="56" rx="9" fill="#ED7100"/>
+    <rect x="833" y="85" width="30" height="30" fill="none" stroke="#fff" stroke-width="2.3"/>
+    <path d="M833 94 h30 M842 85 v30" stroke="#fff" stroke-width="2.3"/>
+    <text x="894" y="98" font-size="19" font-weight="bold" fill="#232F3E">productsd</text>
+    <text x="894" y="120" font-size="15" fill="#1D8102">3 copies · scales freely</text>
+  </g>
+  <g>
+    <rect x="820" y="162" width="56" height="56" rx="9" fill="#ED7100"/>
+    <rect x="833" y="175" width="30" height="30" fill="none" stroke="#fff" stroke-width="2.3"/>
+    <path d="M833 184 h30 M842 175 v30" stroke="#fff" stroke-width="2.3"/>
+    <text x="894" y="188" font-size="19" font-weight="bold" fill="#232F3E">userd</text>
+    <text x="894" y="210" font-size="15" fill="#1D8102">3 copies · scales freely</text>
+  </g>
+  <g>
+    <rect x="820" y="350" width="56" height="56" rx="9" fill="#ED7100"/>
+    <rect x="833" y="363" width="30" height="30" fill="none" stroke="#fff" stroke-width="2.3"/>
+    <path d="M833 372 h30 M842 363 v30" stroke="#fff" stroke-width="2.3"/>
+    <text x="894" y="376" font-size="19" font-weight="bold" fill="#232F3E">orderd</text>
+    <text x="894" y="398" font-size="15" fill="#D13212">1 copy · it writes</text>
+  </g>
+
+  <path d="M740 130 H820" stroke="#1D8102" stroke-width="2.4" fill="none" marker-end="url(#g)"/>
+  <path d="M740 180 C 780 180, 780 190, 820 190" stroke="#1D8102" stroke-width="2.4" fill="none" marker-end="url(#g)"/>
+  <path d="M740 378 H820" stroke="#D13212" stroke-width="2.4" fill="none" marker-end="url(#o)"/>
+
+  <!-- the two hops -->
+  <path d="M848 350 V240 H876" stroke="#5A6B78" stroke-width="2" stroke-dasharray="5 4" fill="none" marker-end="url(#d)"/>
+  <text x="890" y="246" font-size="14" fill="#5A6B78">orderd must ask: “who is this?”</text>
+  <path d="M862 350 V132 H876" stroke="#5A6B78" stroke-width="2" stroke-dasharray="5 4" fill="none" marker-end="url(#d)"/>
+  <text x="890" y="60" font-size="14" fill="#5A6B78">…and “what does it cost?”</text>
+
+  <rect x="220" y="500" width="880" height="64" rx="8" fill="#FFF7E6" stroke="#ED7100" stroke-width="1.6"/>
+  <text x="244" y="528" font-size="19" font-weight="bold" fill="#232F3E">Reads and writes do not grow at the same rate.</text>
+  <text x="244" y="552" font-size="16" fill="#5A6B78">That is the whole reason there are three services and not one.</text>
+</svg>

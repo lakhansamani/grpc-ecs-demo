@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 560" width="1180" height="560" font-family="Helvetica,Arial,sans-serif">
+  <defs><marker id="p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 z" fill="#232F3E"/></marker></defs>
+  <rect width="1180" height="560" fill="#fff"/>
+
+  <rect x="40" y="36" width="330" height="76" rx="8" fill="#F4F6F8" stroke="#879196"/>
+  <text x="56" y="62" font-size="15" font-family="monospace" fill="#232F3E">POST /v1/orders</text>
+  <text x="56" y="84" font-size="13" font-family="monospace" fill="#5A6B78">{ items:[{productId, quantity}],</text>
+  <text x="56" y="101" font-size="13" font-family="monospace" fill="#5A6B78">  idempotencyKey }</text>
+  <text x="386" y="78" font-size="14" fill="#D13212" font-weight="bold">no price field</text>
+
+  <g><rect x="110" y="156" width="56" height="56" rx="9" fill="#ED7100"/>
+     <rect x="123" y="169" width="30" height="30" fill="none" stroke="#fff" stroke-width="2.3"/>
+     <path d="M123 178 h30 M132 169 v30" stroke="#fff" stroke-width="2.3"/>
+     <text x="184" y="182" font-size="18" font-weight="bold" fill="#232F3E">gatewayd</text>
+     <text x="184" y="202" font-size="14" fill="#5A6B78">REST → gRPC · generated, not written</text></g>
+  <path d="M138 112 V156" stroke="#232F3E" stroke-width="2" marker-end="url(#p)"/>
+
+  <g><rect x="110" y="276" width="56" height="56" rx="9" fill="#ED7100"/>
+     <rect x="123" y="289" width="30" height="30" fill="none" stroke="#fff" stroke-width="2.3"/>
+     <path d="M123 298 h30 M132 289 v30" stroke="#fff" stroke-width="2.3"/>
+     <text x="184" y="302" font-size="18" font-weight="bold" fill="#232F3E">orderd</text>
+     <text x="184" y="322" font-size="14" fill="#5A6B78">CreateOrder</text></g>
+  <path d="M138 212 V276" stroke="#232F3E" stroke-width="2" marker-end="url(#p)"/>
+  <text x="148" y="248" font-size="13" fill="#5A6B78">gRPC · authorization forwarded</text>
+
+  <g><rect x="620" y="196" width="56" height="56" rx="9" fill="#ED7100"/>
+     <rect x="633" y="209" width="30" height="30" fill="none" stroke="#fff" stroke-width="2.3"/>
+     <path d="M633 218 h30 M642 209 v30" stroke="#fff" stroke-width="2.3"/>
+     <text x="694" y="222" font-size="18" font-weight="bold" fill="#232F3E">userd</text>
+     <text x="694" y="242" font-size="14" fill="#5A6B78">VerifyToken → “who is this?”</text></g>
+  <path d="M166 292 C 400 292, 420 224, 620 224" stroke="#232F3E" stroke-width="2.2" fill="none" marker-end="url(#p)"/>
+
+  <g><rect x="620" y="330" width="56" height="56" rx="9" fill="#ED7100"/>
+     <rect x="633" y="343" width="30" height="30" fill="none" stroke="#fff" stroke-width="2.3"/>
+     <path d="M633 352 h30 M642 343 v30" stroke="#fff" stroke-width="2.3"/>
+     <text x="694" y="356" font-size="18" font-weight="bold" fill="#232F3E">productsd</text>
+     <text x="694" y="376" font-size="14" fill="#5A6B78">CheckAvailability → price + stock</text>
+     <text x="694" y="395" font-size="13" fill="#D13212">internal only · 404 over REST</text></g>
+  <path d="M166 316 C 400 316, 420 358, 620 358" stroke="#232F3E" stroke-width="2.2" fill="none" marker-end="url(#p)"/>
+
+  <g><rect x="110" y="420" width="56" height="56" rx="9" fill="#527FFF"/>
+     <ellipse cx="138" cy="437" rx="15" ry="5.5" fill="none" stroke="#fff" stroke-width="2.2"/>
+     <path d="M123 437 v21 a15 5.5 0 0 0 30 0 v-21" fill="none" stroke="#fff" stroke-width="2.2"/>
+     <text x="184" y="444" font-size="18" font-weight="bold" fill="#232F3E">persist</text>
+     <text x="184" y="464" font-size="14" fill="#5A6B78">RDS database “orderd”, or SQLite on the task</text></g>
+  <path d="M138 332 V420" stroke="#232F3E" stroke-width="2" marker-end="url(#p)"/>
+
+  <rect x="620" y="432" width="500" height="80" rx="8" fill="#F0FAF2" stroke="#1D8102" stroke-width="1.6"/>
+  <text x="640" y="458" font-size="15" font-weight="bold" fill="#232F3E">total computed from CATALOGUE prices</text>
+  <text x="640" y="480" font-size="14" font-family="monospace" fill="#5A6B78">200 { order: { status: CONFIRMED, totalMinor } }</text>
+  <text x="640" y="500" font-size="13" fill="#1D8102">a rejection is OK + an enum, not an error</text>
+</svg>
