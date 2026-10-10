@@ -296,6 +296,31 @@ You will read that gRPC is "faster". Here is the accurate version.
 
 ---
 
+## How much smaller, actually? Let us measure it.
+
+```sh
+make wire-size
+```
+
+Real output, encoding **this system's own message types**:
+
+| Message | Protobuf | JSON | |
+|---|---|---|---|
+| `CreateOrderRequest`, 1 item | **27 B** | 80 B | 3.0× |
+| `CreateOrderRequest`, 3 items | **51 B** | 152 B | 3.0× |
+| One `Product` | **87 B** | 170 B | 2.0× |
+| `SearchProductsResponse`, 20 products | **1782 B** | 3452 B | 1.9× |
+
+**Why:** Protobuf drops the field *names* — a field on the wire is a number
+and a wire type — and packs integers as varints instead of decimal text. JSON
+repeats every key on every object, which is why the gap widens on repeated
+fields.
+
+> On a browse-heavy read path that is real. It is still usually not why teams
+> adopt gRPC: **your database will cost you more than your encoder.**
+
+---
+
 ## [ASK] So people say gRPC is for streaming
 
 I counted every RPC in the real `.proto` files of **14 projects you have heard
@@ -467,117 +492,18 @@ Your container is running on Fargate. There is a kernel underneath it.
 
 ---
 
-## What Fargate actually gives you — and what it does not
+## What Fargate gives you
 
-**Fargate = run containers without managing EC2 instances.** AWS's words: *"you
-no longer have to provision, configure, or scale clusters of virtual
-machines."*
+**Run containers without managing servers.** AWS's words: *"you no longer have
+to provision, configure, or scale clusters of virtual machines."*
 
-**AWS owns** the *platform version*, which AWS defines as *"a combination of
-the kernel and container runtime versions."* So AWS patches it. But:
+- No AMI to bake, no instance to patch, no autoscaling group
+- You declare CPU and memory; AWS finds somewhere to run it
+- A task role **is** an IAM role
 
-> "If a security issue is found that affects an existing platform version, AWS
-> creates a new patched revision of the platform version **and retires tasks
-> running on the vulnerable revision.**"
-
-**AWS will stop your task to patch underneath you.** A task never upgrades in
-place — a *new* task gets the new revision.
-
-**And you still own** everything **inside** your image: your base image, your
-packages, your CVEs.
-
-> **Show:** `terraform/modules/ecs-service/main.tf` — `runtime_platform`,
-> `requires_compatibilities`, `stopTimeout`
-
-> **Serverless does not mean nobody patches.** It means AWS patches their half,
-> kills your task to do it, and you still patch yours.
->
-> Which is why graceful shutdown is not optional. Remember that.
-
----
-
-## How health checks are actually wired here
-
-**What:** the same question — *is this task alive?* — asked at **four**
-independent layers.
-
-```
- 1. YOUR CODE      grpc.health.v1.Health          registered in grpcserver
- 2. THE CONTAINER  task definition healthCheck -> /healthcheck binary
- 3. SERVICE DISCOVERY  Cloud Map takes ECS's verdict -> DNS answers or not
- 4. (production)   ALB target group -> /pkg.Service/Method
-```
-
-**Why four?** Because each one controls something different:
-
-| Layer | If it says unhealthy |
-|---|---|
-| **1 · app** | callers and every layer below learn something is wrong |
-| **2 · container** | **ECS replaces the task** |
-| **3 · Cloud Map** | the task is **removed from DNS**, so no new client reaches it |
-| **4 · ALB** | the target stops receiving requests |
-
-**How:**
-
-```go
-// 1. in grpcserver — and only AFTER everything is wired up
-hs := health.NewServer()
-healthpb.RegisterHealthServer(s, hs)
-hs.SetServingStatus(serviceName, healthpb.HealthCheckResponse_SERVING)
-```
-
-```hcl
-# 2. in the task definition. The image is DISTROLESS - no shell, no curl, no
-# grpc-health-probe - so a tiny Go binary is baked in instead.
-healthCheck = {
-  command     = ["CMD", "/healthcheck", "-addr", "localhost:50051", "-service", "userd"]
-  interval    = 10
-  retries     = 3
-  startPeriod = 10
-}
-```
-
-`gatewayd` serves HTTP, not gRPC, so the same binary takes `-http
-http://localhost:8080/healthz`. One `protocol` variable in the module picks
-which.
-
-> **Show:** `cmd/healthcheck/main.go` — 80 lines, and note it dials
-> `passthrough:///`. This probe must hit **its own container**, so DNS
-> resolution and load balancing would be actively wrong here.
-
----
-
-## The health check is also how you shut down cleanly
-
-On `SIGTERM`, the **order** matters, and it is the opposite of what feels
-natural:
-
-```go
-// 1. fail health checks FIRST - stop being given new work
-hs.SetServingStatus(name, healthpb.HealthCheckResponse_NOT_SERVING)
-hs.Shutdown()
-
-// 2. THEN drain in-flight RPCs
-GracefulStop()      // bounded by SHUTDOWN_TIMEOUT
-
-// 3. hard stop as a backstop
-Stop()
-```
-
-Flip 1 and 2 and you keep accepting new requests while trying to drain.
-
-And the two timeouts have to agree:
-
-```
-stopTimeout      = 30   # ECS: how long it waits before SIGKILL
-SHUTDOWN_TIMEOUT = 15s  # the app: how long it drains
-```
-
-> If `stopTimeout` is **shorter** than your drain, ECS kills you mid-drain and
-> every line of graceful-shutdown code you wrote did nothing.
->
-> Remember slide 24: AWS **retires your task** to patch the platform. This is
-> the code path that makes that a non-event.
+That is the whole pitch, and for four small services it is the right pairing
+with ECS. The one thing to remember: **you still own what is inside your
+image** — your base image, your packages, your CVEs.
 
 ---
 
@@ -877,6 +803,16 @@ all**. Cloud Map then never accepts ECS's health reports → every instance stay
 Four healthy tasks. Zero addresses returned.
 
 > The comment in that file now says, in capitals, **do not clean this up.**
+
+**And the same error has a second, unrelated cause.** On ECS all four services
+are created at once, so `orderd` can boot *before* `userd` has registered in
+Cloud Map. Its first lookup finds nothing, `round_robin` starts with an empty
+address list, and it reports exactly the same thing — while every task, Cloud
+Map instance, DNS record and security-group rule is correct. The fix is a
+background loop that keeps asking (`grpcclient.KeepWarm`).
+
+> One error string, two causes, and in both cases **everything else looks
+> fine.**
 
 ---
 
@@ -1451,6 +1387,29 @@ On ECS the other end is **three tasks with three IPs**.
 
 ---
 
+## Run it both ways yourself
+
+```sh
+make demo-lb-before     # gRPC's DEFAULT
+make demo-lb-after      # the fix
+```
+
+Each one redeploys `orderd` with that client behaviour, scales `userd` to 3,
+drives 120 authenticated calls, and prints the per-task delta. No Prometheus,
+no browser — it lands in the terminal.
+
+```
+==> delta per task  (lb_policy=pick_first)        ==> delta per task  (lb_policy=round_robin)
+  24c2e5c4     +0                                   24c2e5c4     +40
+  59c81e0d     +120                                 59c81e0d     +40
+  f00e0830     +0                                   f00e0830     +40
+```
+
+Measured on this repo. Same image, same task definition, same DNS — **two
+client settings.**
+
+---
+
 ## The fix is two halves. Either alone does nothing.
 
 ```go
@@ -1587,12 +1546,29 @@ make proto             # buf lint + generate (Go, gateway, OpenAPI, TypeScript)
 make proto-breaking    # fail if a change would break existing clients
 ```
 
-**AWS.**
+**The load-balancing demo, in the terminal.**
 
 ```sh
+make demo-lb-before   # gRPC's DEFAULT: one task takes everything
+make demo-lb-after    # the fix: evenly spread
+make demo-lb          # both, back to back
+make lb-report        # just the per-task counters
+make wire-size        # protobuf vs JSON, measured
+```
+
+**AWS — two commands.**
+
+```sh
+make tf-aws-apply      # init -> ECR repos -> build+push -> apply -> wait -> print IPs
 make ps-aws            # the same 7 proofs, against real ECS
 make aws-ip            # every task's PUBLIC IP:port, ready for grpcurl/curl
+make tf-aws-destroy    # drain -> destroy -> VERIFY nothing is still billing
 ```
+
+`tf-aws-apply` prints the account and your egress IP first, and refuses to run
+without `terraform/envs/aws/terraform.tfvars`. `tf-aws-destroy` drains every
+service to 0 and waits 75s before destroying, because ECS has to deregister
+from Cloud Map or `DeleteService` returns `ResourceInUse`.
 
 ---
 

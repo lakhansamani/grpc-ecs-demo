@@ -11,7 +11,8 @@ LOCAL_AWS := AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGIO
 .PHONY: local-up local-down tf-local-apply tf-local-destroy dns demo demo-load wait-ready \
         scale test ps ps-aws aws-ip tf-aws-apply tf-aws-destroy \
         forward forward-stop images images-push \
-        api-coverage show-guard \
+        api-coverage show-guard wire-size \
+        demo-lb demo-lb-before demo-lb-after lb-report \
         proto proto-breaking ts-demo
 
 local-up:                      ## emulator + observability
@@ -154,6 +155,28 @@ test:
 # awsvpc tasks have no host port, so the demo client runs ON the task network.
 demo:
 	bash scripts/smoke.sh
+
+# ---- the load-balancing demo, in the terminal (no Prometheus needed) ----
+#
+# Two commands, run in this order:
+#   make demo-lb-before   gRPC's DEFAULT (pick_first): one task takes everything
+#   make demo-lb-after    the fix (round_robin + dns:///): evenly spread
+#
+# Each one redeploys orderd with that client behaviour, scales userd to 3,
+# drives load, and prints the per-task delta. `make demo-lb` runs both.
+demo-lb-before:
+	@$(MAKE) --no-print-directory scale N=3
+	@bash scripts/lb-demo.sh pick_first
+
+demo-lb-after:
+	@$(MAKE) --no-print-directory scale N=3
+	@bash scripts/lb-demo.sh round_robin
+
+demo-lb: demo-lb-before demo-lb-after
+
+# Just the per-task counters, without redeploying anything.
+lb-report:
+	@bash scripts/lb-report.sh
 
 # Sustained load through orderd, so every request makes orderd call
 # userd.VerifyToken - the hop the load-balancing demo is about.
@@ -313,6 +336,11 @@ dev-gatewayd:
 # Prove REST works, and that the internal-only RPC is NOT exposed.
 dev-rest:
 	@bash scripts/rest-smoke.sh
+
+# Measure the same message as protobuf and as JSON. Run it on stage instead of
+# claiming a number on a slide.
+wire-size:
+	@go run ./cmd/wiresize
 
 # Hit every rpc and every REST route, and report anything missed.
 api-coverage:
