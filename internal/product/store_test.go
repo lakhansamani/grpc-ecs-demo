@@ -33,9 +33,10 @@ func newTestStore(t *testing.T) (*Store, *gorm.DB) {
 	return NewStore(db), db
 }
 
-// ftsQuery is the only place user input reaches FTS5, which has its own query
-// syntax. If this stops neutralising operators and quotes, a search box
-// becomes a query-injection hole.
+// searchTerms is the only place user input reaches a query builder, and both
+// FTS5 and postgres to_tsquery have their own syntax. If this stops reducing
+// input to bare alphanumeric words, a search box becomes a query-injection
+// hole on both engines at once.
 func TestFTSQuerySanitisesInput(t *testing.T) {
 	for in, want := range map[string]string{
 		"headphones":       `"headphones"*`,
@@ -49,8 +50,40 @@ func TestFTSQuerySanitisesInput(t *testing.T) {
 		"!!! ???":          "",
 		"sony-wh1000":      `"sonywh1000"*`,
 	} {
-		if got := ftsQuery(in); got != want {
-			t.Errorf("ftsQuery(%q) = %q, want %q", in, got, want)
+		if got := fts5Query(searchTerms(in)); want == "" {
+			if len(searchTerms(in)) != 0 {
+				t.Errorf("searchTerms(%q) should be empty, got %v", in, searchTerms(in))
+			}
+		} else if got != want {
+			t.Errorf("fts5Query(searchTerms(%q)) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// The postgres builder must neutralise the same input, and must not emit any
+// to_tsquery operator the user typed. ":" and "&" and "|" are all operators
+// there; none may survive into the expression except the ones we add.
+func TestPostgresQuerySanitisesInput(t *testing.T) {
+	for in, want := range map[string]string{
+		"headphones":       "headphones:*",
+		"noise cancelling": "noise & cancelling:*",
+		"  Noise  SHOES  ": "noise & shoes:*",
+		"a | b":            "a & b:*",
+		"a & b":            "a & b:*",
+		"title:bad":        "titlebad:*",
+		"shoes:*":          "shoes:*",
+		"sony-wh1000":      "sonywh1000:*",
+	} {
+		terms := searchTerms(in)
+		if got := postgresQuery(terms); got != want {
+			t.Errorf("postgresQuery(searchTerms(%q)) = %q, want %q", in, got, want)
+		}
+	}
+	// Garbage must produce no terms at all, so Search short-circuits before
+	// ever building an expression.
+	for _, in := range []string{"", "!!! ???", ":::", "&|&"} {
+		if terms := searchTerms(in); len(terms) != 0 {
+			t.Errorf("searchTerms(%q) = %v, want empty", in, terms)
 		}
 	}
 }

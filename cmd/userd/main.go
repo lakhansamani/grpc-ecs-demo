@@ -18,6 +18,7 @@ import (
 	"github.com/lakhansamani/grpc-ecs-demo/internal/platform/grpcserver"
 	"github.com/lakhansamani/grpc-ecs-demo/internal/platform/observability"
 	"github.com/lakhansamani/grpc-ecs-demo/internal/platform/store"
+	"github.com/lakhansamani/grpc-ecs-demo/internal/seeddata"
 	"github.com/lakhansamani/grpc-ecs-demo/internal/user"
 )
 
@@ -44,6 +45,7 @@ func run(log *slog.Logger) error {
 	metricsAddr := cfg.Optional("METRICS_ADDR", ":9091")
 	otlpEndpoint := cfg.Optional("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	env := cfg.Optional("ENVIRONMENT", "local")
+	seedOnBoot := cfg.Optional("SEED_ON_BOOT", "false") == "true"
 	maxConnAge := cfg.Duration("GRPC_MAX_CONNECTION_AGE", 0)
 	shutdownTimeout := cfg.Duration("SHUTDOWN_TIMEOUT", 0)
 	if err := cfg.Err(); err != nil {
@@ -73,6 +75,17 @@ func run(log *slog.Logger) error {
 	db, err := store.Open(store.Config{Driver: dbDriver, URL: dbURL}, user.Models()...)
 	if err != nil {
 		return err
+	}
+
+	// With a shared database there is no baked-in file, so the demo users are
+	// loaded at boot. Idempotent and safe from several tasks at once: the email
+	// column is unique, so a loser of the race just carries on.
+	if seedOnBoot {
+		n, err := seeddata.LoadUsers(ctx, db)
+		if err != nil {
+			return err
+		}
+		log.Info("seeded users", "created", n, "total", len(seeddata.Users))
 	}
 
 	issuer, err := user.NewIssuer(jwtSecret)

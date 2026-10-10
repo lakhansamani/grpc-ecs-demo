@@ -5,8 +5,14 @@
 // search and availability queries the same way. That is what lets a service
 // with an embedded database scale horizontally.
 //
-// Search is SQLite FTS5 - real full-text matching with relevance ranking, in
-// pure Go with CGO disabled. No Elasticsearch, and the image stays distroless.
+// Search is real full-text matching with relevance ranking on BOTH drivers,
+// and the two engines are genuinely different:
+//
+//	sqlite   - an FTS5 virtual table, bm25 ranking, pure Go with CGO disabled
+//	postgres - a STORED generated tsvector column, GIN index, ts_rank ranking
+//
+// Same RPC, same sanitiser, same prefix-match behaviour. No Elasticsearch
+// either way, and the image stays distroless.
 package product
 
 import (
@@ -40,21 +46,47 @@ type Store struct{ db *gorm.DB }
 
 func NewStore(db *gorm.DB) *Store { return &Store{db: db} }
 
+// isPostgres asks GORM which engine is underneath, rather than threading a
+// driver string through every constructor.
+func isPostgres(db *gorm.DB) bool {
+	return db != nil && db.Dialector != nil && db.Dialector.Name() == "postgres"
+}
+
 // Models is what the migrator needs to know about.
 func Models() []any { return []any{&Product{}} }
 
-// BuildSearchIndex creates the FTS5 index and fills it from the products table.
-// Called by the seeder at image build time, never at runtime.
+// BuildSearchIndex creates the full-text index and fills it from the products
+// table. On sqlite the seeder calls it at image build time; on postgres it is
+// safe to call at boot from several tasks at once, because every statement is
+// IF NOT EXISTS or a generated column the database maintains itself.
 func BuildSearchIndex(db *gorm.DB) error {
-	stmts := []string{
-		`DROP TABLE IF EXISTS product_search`,
-		// `content=` makes this an external-content index: the text is not
-		// duplicated, FTS5 reads it back from products via rowid.
-		`CREATE VIRTUAL TABLE product_search USING fts5(
-			title, brand, category, product_id UNINDEXED, tokenize='porter unicode61'
-		)`,
-		`INSERT INTO product_search(title, brand, category, product_id)
-			SELECT title, brand, category, id FROM products`,
+	var stmts []string
+	if isPostgres(db) {
+		stmts = []string{
+			// A STORED generated column, so postgres keeps the tsvector in step
+			// with the row on every write. Nothing in the app has to remember
+			// to reindex, which is the usual way a search index goes stale.
+			`ALTER TABLE products ADD COLUMN IF NOT EXISTS search_tsv tsvector
+				GENERATED ALWAYS AS (
+					to_tsvector('english',
+						coalesce(title, '') || ' ' ||
+						coalesce(brand, '') || ' ' ||
+						coalesce(category, ''))
+				) STORED`,
+			`CREATE INDEX IF NOT EXISTS products_search_tsv_idx
+				ON products USING GIN (search_tsv)`,
+		}
+	} else {
+		stmts = []string{
+			`DROP TABLE IF EXISTS product_search`,
+			// `content=` makes this an external-content index: the text is not
+			// duplicated, FTS5 reads it back from products via rowid.
+			`CREATE VIRTUAL TABLE product_search USING fts5(
+				title, brand, category, product_id UNINDEXED, tokenize='porter unicode61'
+			)`,
+			`INSERT INTO product_search(title, brand, category, product_id)
+				SELECT title, brand, category, id FROM products`,
+		}
 	}
 	for _, s := range stmts {
 		if err := db.Exec(s).Error; err != nil {
@@ -93,10 +125,19 @@ func (s *Store) Get(ctx context.Context, id string) (*Product, error) {
 // Search runs a ranked full-text query and returns the page plus the total
 // number of matches.
 func (s *Store) Search(ctx context.Context, query string, limit int) ([]Product, int, error) {
-	match := ftsQuery(query)
-	if match == "" {
+	terms := searchTerms(query)
+	if len(terms) == 0 {
 		return nil, 0, nil
 	}
+
+	if isPostgres(s.db) {
+		return s.searchPostgres(ctx, terms, limit)
+	}
+	return s.searchSQLite(ctx, terms, limit)
+}
+
+func (s *Store) searchSQLite(ctx context.Context, terms []string, limit int) ([]Product, int, error) {
+	match := fts5Query(terms)
 
 	var total int64
 	if err := s.db.WithContext(ctx).
@@ -118,6 +159,32 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]Product,
 	return out, int(total), nil
 }
 
+func (s *Store) searchPostgres(ctx context.Context, terms []string, limit int) ([]Product, int, error) {
+	// to_tsquery, not websearch_to_tsquery: websearch_to_tsquery cannot express
+	// a prefix match, and prefix-matching the last word is what makes "head"
+	// find "headphones" - the same behaviour the FTS5 path has. Passing raw
+	// input to to_tsquery would be an injection and a syntax-error risk, so the
+	// terms are sanitised to [a-z0-9] first by searchTerms.
+	tsq := postgresQuery(terms)
+
+	var total int64
+	if err := s.db.WithContext(ctx).
+		Raw(`SELECT count(*) FROM products WHERE search_tsv @@ to_tsquery('english', ?)`, tsq).
+		Scan(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("product: search count: %w", err)
+	}
+
+	var out []Product
+	if err := s.db.WithContext(ctx).Raw(`
+		SELECT * FROM products
+		WHERE search_tsv @@ to_tsquery('english', ?)
+		ORDER BY ts_rank(search_tsv, to_tsquery('english', ?)) DESC, title ASC
+		LIMIT ?`, tsq, tsq, limit).Scan(&out).Error; err != nil {
+		return nil, 0, fmt.Errorf("product: search: %w", err)
+	}
+	return out, int(total), nil
+}
+
 // ByIDs fetches several products at once, for availability checks.
 func (s *Store) ByIDs(ctx context.Context, ids []string) (map[string]Product, error) {
 	if len(ids) == 0 {
@@ -134,12 +201,14 @@ func (s *Store) ByIDs(ctx context.Context, ids []string) (map[string]Product, er
 	return out, nil
 }
 
-// ftsQuery turns user input into a safe FTS5 MATCH expression.
+// searchTerms reduces user input to lowercase alphanumeric words.
 //
-// FTS5 has its own query syntax, so raw input would let a user write operators
-// - or crash the query with an unbalanced quote. Each word is quoted as a
-// literal and the last one gets a prefix `*` so "head" finds "headphones".
-func ftsQuery(raw string) string {
+// This is the security boundary for both engines. FTS5 and to_tsquery each have
+// their own query syntax, so raw input could inject operators or crash the
+// query with an unbalanced quote. Everything that is not a letter or a digit is
+// dropped here, once, so neither driver-specific builder below has to be
+// careful.
+func searchTerms(raw string) []string {
 	var terms []string
 	for _, w := range strings.Fields(strings.ToLower(raw)) {
 		var b strings.Builder
@@ -152,9 +221,12 @@ func ftsQuery(raw string) string {
 			terms = append(terms, b.String())
 		}
 	}
-	if len(terms) == 0 {
-		return ""
-	}
+	return terms
+}
+
+// fts5Query builds an FTS5 MATCH expression: every term quoted as a literal,
+// with the last one prefix-matched so "head" finds "headphones".
+func fts5Query(terms []string) string {
 	quoted := make([]string, len(terms))
 	for i, t := range terms {
 		if i == len(terms)-1 {
@@ -164,6 +236,20 @@ func ftsQuery(raw string) string {
 		}
 	}
 	return strings.Join(quoted, " AND ")
+}
+
+// postgresQuery builds a to_tsquery expression with the same shape: AND
+// between terms, prefix match on the last one.
+func postgresQuery(terms []string) string {
+	parts := make([]string, len(terms))
+	for i, t := range terms {
+		if i == len(terms)-1 {
+			parts[i] = t + ":*"
+		} else {
+			parts[i] = t
+		}
+	}
+	return strings.Join(parts, " & ")
 }
 
 // AsProto converts to the wire type.

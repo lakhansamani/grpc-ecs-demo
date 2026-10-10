@@ -19,6 +19,7 @@ import (
 	"github.com/lakhansamani/grpc-ecs-demo/internal/platform/observability"
 	"github.com/lakhansamani/grpc-ecs-demo/internal/platform/store"
 	"github.com/lakhansamani/grpc-ecs-demo/internal/product"
+	"github.com/lakhansamani/grpc-ecs-demo/internal/seeddata"
 )
 
 const serviceName = "productsd"
@@ -41,6 +42,7 @@ func run(log *slog.Logger) error {
 	metricsAddr := cfg.Optional("METRICS_ADDR", ":9093")
 	otlpEndpoint := cfg.Optional("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	env := cfg.Optional("ENVIRONMENT", "local")
+	seedOnBoot := cfg.Optional("SEED_ON_BOOT", "false") == "true"
 	maxConnAge := cfg.Duration("GRPC_MAX_CONNECTION_AGE", 0)
 	shutdownTimeout := cfg.Duration("SHUTDOWN_TIMEOUT", 0)
 	if err := cfg.Err(); err != nil {
@@ -67,6 +69,18 @@ func run(log *slog.Logger) error {
 	db, err := store.Open(store.Config{Driver: dbDriver, URL: dbURL}, product.Models()...)
 	if err != nil {
 		return err
+	}
+
+	// With a shared database there is no baked-in file, so the catalogue is
+	// loaded at boot. Idempotent and safe from several tasks at once - see
+	// internal/seeddata. With SQLite this is already done at image build time,
+	// so the default is off.
+	if seedOnBoot {
+		n, err := seeddata.LoadProducts(ctx, db)
+		if err != nil {
+			return err
+		}
+		log.Info("seeded catalogue", "products", n)
 	}
 
 	registry := prometheus.NewRegistry()
