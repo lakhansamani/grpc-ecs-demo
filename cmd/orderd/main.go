@@ -105,15 +105,25 @@ func run(log *slog.Logger) error {
 	}
 	defer func() { _ = productConn.Close() }()
 
-	// Connect to the upstreams before we start accepting traffic, so the
-	// first real request does not pay for the handshake - or fail outright.
-	// Not fatal: they may legitimately come up after us.
+	// Connect to the upstreams before we start accepting traffic, so the first
+	// real request does not pay for the handshake - or fail outright. Not
+	// fatal: they may legitimately come up after us.
+	//
+	// And then KEEP trying in the background. On ECS every service is created
+	// at once, so this one can boot before its upstreams have registered in
+	// Cloud Map - and a round_robin balancer that starts with an empty address
+	// list does not reliably dig itself out. Verified on real AWS: without
+	// this, every RPC failed with "no children to pick from" while every task,
+	// Cloud Map instance, DNS record and security-group rule looked correct.
+	warmCtx, stopWarming := context.WithCancel(ctx)
+	defer stopWarming()
 	for name, conn := range map[string]*grpc.ClientConn{"user": userConn, "product": productConn} {
-		if err := grpcclient.Warm(ctx, conn, 5*time.Second); err != nil {
-			log.Warn("upstream not ready at boot, will connect on demand", "upstream", name, "err", err)
+		if err := grpcclient.Warm(ctx, conn, 30*time.Second); err != nil {
+			log.Warn("upstream not ready at boot, will keep retrying", "upstream", name, "err", err)
 		} else {
 			log.Info("upstream ready", "upstream", name)
 		}
+		go grpcclient.KeepWarm(warmCtx, conn, 5*time.Second)
 	}
 
 	srv := grpcserver.New(grpcserver.Config{

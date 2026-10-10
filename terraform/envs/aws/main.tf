@@ -12,6 +12,24 @@ variable "operator_ingress_cidrs" {
   default     = []
   description = "Your public IP as a /32 so the demo client can reach gatewayd. Keep this tight."
 }
+# WHERE TO SET YOUR AWS PROFILE.
+#
+# Three options, and they are checked in this order:
+#   1. this variable  -> terraform.tfvars:  aws_profile = "my-profile"
+#                        or on the command line: -var aws_profile=my-profile
+#   2. the environment -> export AWS_PROFILE=my-profile
+#   3. default credentials
+#
+# Option 1 is the safe one for a demo account: the account is pinned in the
+# config, so a stale `export AWS_PROFILE=something-else` cannot quietly point
+# an apply at the wrong place. Always confirm with:
+#   aws sts get-caller-identity
+variable "aws_profile" {
+  type        = string
+  default     = ""
+  description = "Named AWS profile to use. Empty means use the environment."
+}
+
 # Region lives here so you can switch without editing the stack. Fargate ARM64
 # is available in all commercial regions, so any of them works.
 variable "aws_region" {

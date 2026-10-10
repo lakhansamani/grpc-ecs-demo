@@ -9,7 +9,8 @@ LOCAL_AWS := AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGIO
              aws --endpoint-url http://localhost:4566
 
 .PHONY: local-up local-down tf-local-apply tf-local-destroy dns demo demo-load wait-ready \
-        scale test ps ps-aws aws-ip forward forward-stop images images-push \
+        scale test ps ps-aws aws-ip tf-aws-apply tf-aws-destroy \
+        forward forward-stop images images-push \
         api-coverage show-guard \
         proto proto-breaking ts-demo
 
@@ -74,6 +75,72 @@ ps:
 # Same, against real AWS (no endpoint override).
 ps-aws:
 	@CLUSTER=ecom-aws bash scripts/ps.sh
+
+# ---- real AWS: two commands, and here is what they do ----
+TF_AWS := terraform -chdir=terraform/envs/aws
+
+# ONE command to stand the whole thing up on real AWS.
+#
+# Under the hood, in order:
+#   1. terraform init          install the AWS provider and the modules
+#   2. apply -target=...ecr    create the four ECR repositories FIRST, because
+#                              you cannot push an image to a repo that does not
+#                              exist, and you cannot start a service from an
+#                              image that has not been pushed
+#   3. make images-push        build four ARM64 distroless images and push them,
+#                              using the account + region from your credentials
+#   4. terraform apply         the rest: VPC, subnets, security group, cluster,
+#                              Cloud Map, log group, IAM roles, the JWT secret,
+#                              four task definitions, four ECS services
+#   5. make aws-ip             print each task's public IP:port
+#
+# Needs terraform/envs/aws/terraform.tfvars (copy terraform.tfvars.example).
+# It is ~2 minutes without RDS. Set `use_rds = true` there for a database,
+# which adds 5-10 minutes.
+tf-aws-apply:
+	@echo "==> which account?"
+	@aws sts get-caller-identity --query '{Account:Account,Arn:Arn}' --output table
+	@test -f terraform/envs/aws/terraform.tfvars || { \
+		echo "missing terraform/envs/aws/terraform.tfvars"; \
+		echo "  cp terraform/envs/aws/terraform.tfvars.example terraform/envs/aws/terraform.tfvars"; \
+		exit 1; }
+	@echo "==> your egress IPv4 (must be in operator_ingress_cidrs, or nothing is reachable)"
+	@curl -s -4 ifconfig.me; echo
+	@echo "==> 1/5 terraform init"
+	@$(TF_AWS) init -upgrade
+	@echo "==> 2/5 ECR repositories first"
+	@$(TF_AWS) apply -auto-approve -target=module.deployment.module.ecr
+	@echo "==> 3/5 build + push four ARM64 images"
+	@$(MAKE) --no-print-directory images-push
+	@echo "==> 4/5 the rest of the stack"
+	@$(TF_AWS) apply -auto-approve
+	@echo "==> 5/5 waiting for four RUNNING tasks"
+	@bash scripts/aws-wait.sh
+	@$(MAKE) --no-print-directory aws-ip
+
+# Tear it ALL down, and verify nothing is still billing.
+#
+# Under the hood:
+#   1. scale every service to 0 and wait ~75s, because ECS has to deregister
+#      the tasks from Cloud Map first - otherwise DeleteService returns
+#      ResourceInUse and the destroy fails half-way
+#   2. terraform destroy
+#   3. list the things that cost money, so "Destroy complete" is checked rather
+#      than trusted
+tf-aws-destroy:
+	@echo "==> which account?"
+	@aws sts get-caller-identity --query 'Account' --output text
+	@echo "==> 1/3 draining services to 0 (ECS must deregister from Cloud Map first)"
+	-@for s in userd productsd orderd gatewayd; do \
+		aws ecs update-service --cluster ecom-aws --service $$s --desired-count 0 \
+			--query 'service.serviceName' --output text 2>/dev/null || true; \
+	done
+	@echo "    waiting 75s for deregistration..."
+	@bash -c 'for i in $$(seq 1 75); do printf "."; sleep 1; done; echo'
+	@echo "==> 2/3 terraform destroy"
+	@$(TF_AWS) destroy -auto-approve
+	@echo "==> 3/3 verifying nothing is left"
+	@bash scripts/aws-verify-empty.sh
 
 # Print every task's PUBLIC IP:port on AWS, ready to paste into grpcurl/curl.
 # There is no load balancer and no domain here, so addresses change whenever a

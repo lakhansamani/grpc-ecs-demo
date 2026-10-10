@@ -21,4 +21,10 @@ terraform {
 # ============================================================================
 provider "aws" {
   region = var.aws_region
+
+  # Leave empty to use whatever AWS_PROFILE / credentials the shell has.
+  # Set it (in terraform.tfvars, or -var aws_profile=...) when you want the
+  # account pinned IN THE CONFIG, so a forgotten `export` cannot send an apply
+  # at the wrong account. See variables in main.tf.
+  profile = var.aws_profile != "" ? var.aws_profile : null
 }

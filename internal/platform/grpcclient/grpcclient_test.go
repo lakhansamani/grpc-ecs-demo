@@ -119,3 +119,35 @@ func TestWarmSucceedsAgainstLiveServer(t *testing.T) {
 		t.Fatalf("state after Warm = %v, want Ready", got)
 	}
 }
+
+// KeepWarm must survive a target that never becomes reachable, and must stop
+// when its context is cancelled rather than leaking a goroutine per client.
+//
+// This covers the real-AWS failure: a client whose first DNS lookup finds
+// nothing, because the upstream has not registered in service discovery yet.
+func TestKeepWarmStopsOnContextCancel(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	// A port nothing is listening on, so the connection stays unreachable.
+	conn, err := Dial("127.0.0.1:1", Options{Registry: reg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { KeepWarm(ctx, conn, 10*time.Millisecond); close(done) }()
+
+	// Let it tick a few times against an unreachable target.
+	time.Sleep(60 * time.Millisecond)
+	if conn.GetState() == connectivity.Ready {
+		t.Fatal("did not expect a connection to port 1")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("KeepWarm did not return after its context was cancelled")
+	}
+}

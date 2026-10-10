@@ -132,10 +132,11 @@ func normalizeTarget(target string) string {
 // seconds later.
 //
 // A failure here is not fatal: the upstream may legitimately start after us.
-// The caller logs it and serves anyway, and gRPC reconnects on its own.
+// The caller logs it and serves anyway — but see KeepWarm, because "gRPC
+// reconnects on its own" turned out not to be reliably true.
 func Warm(ctx context.Context, conn *grpc.ClientConn, timeout time.Duration) error {
 	if timeout <= 0 {
-		timeout = 5 * time.Second
+		timeout = 30 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -147,10 +148,70 @@ func Warm(ctx context.Context, conn *grpc.ClientConn, timeout time.Duration) err
 			return nil
 		case connectivity.Shutdown:
 			return fmt.Errorf("grpcclient: connection to %s is shut down", conn.Target())
+		case connectivity.TransientFailure:
+			// Usually means the upstream has not registered in service
+			// discovery yet. Retry immediately instead of waiting out a
+			// backoff that grows towards minutes.
+			conn.ResetConnectBackoff()
+			if !conn.WaitForStateChange(ctx, s) {
+				return fmt.Errorf("grpcclient: %s not ready within %s (state %s)",
+					conn.Target(), timeout, s)
+			}
 		default:
 			if !conn.WaitForStateChange(ctx, s) {
 				return fmt.Errorf("grpcclient: %s not ready within %s (state %s)",
 					conn.Target(), timeout, s)
+			}
+		}
+	}
+}
+
+// KeepWarm keeps nudging a connection back towards Ready, forever, in the
+// background. Start one per client and forget about it.
+//
+// WHY THIS EXISTS — a bug found on real AWS, not locally:
+//
+// On ECS all four services are created at once, so orderd can start BEFORE
+// userd has registered itself in Cloud Map. orderd's first DNS lookup for
+// userd.ecom.local then returns nothing, the round_robin balancer ends up with
+// an empty address list, and every RPC fails with:
+//
+//	rpc error: code = Unavailable desc = no children to pick from
+//
+// Everything else looked perfect while that was happening: four tasks RUNNING
+// and HEALTHY, four Cloud Map instances HEALTHY, the Route 53 A records present
+// and correct, and the security group allowing task-to-task traffic on every
+// port. Redeploying orderd — so it booted after userd was registered — fixed it
+// immediately, which is what identified the cause.
+//
+// ResetConnectBackoff is the primitive that matters here: it wakes subchannels
+// that are in TRANSIENT_FAILURE and makes them retry at once, instead of
+// waiting out a backoff that grows to minutes. Connect covers the IDLE case.
+// ResolveNow would be the obvious call, but it is not exported on
+// *grpc.ClientConn.
+func KeepWarm(ctx context.Context, conn *grpc.ClientConn, every time.Duration) {
+	if every <= 0 {
+		every = 5 * time.Second
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			switch conn.GetState() {
+			case connectivity.Ready:
+				// nothing to do
+			case connectivity.Shutdown:
+				return
+			case connectivity.Idle:
+				conn.Connect()
+			default:
+				// CONNECTING or TRANSIENT_FAILURE. Retry now rather than
+				// waiting out a backoff, and re-resolve as part of it.
+				conn.ResetConnectBackoff()
 			}
 		}
 	}

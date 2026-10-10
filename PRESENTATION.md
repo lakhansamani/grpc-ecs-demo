@@ -779,7 +779,7 @@ gRPC services and the HTTP gateway come out of the **same module**.
 | **Subnets** ×2 | `aws_subnet` | Two availability zones. |
 | **Internet Gateway** | `aws_internet_gateway` | Tasks reach ECR, Secrets Manager, CloudWatch. |
 | **Route table** | `aws_route_table` + assoc | `0.0.0.0/0` → IGW. |
-| **Security group** | `aws_security_group` + 3 rules | A **self-referencing** rule is how `orderd` reaches the others — no CIDRs to maintain. |
+| **Security group** | `aws_security_group` + 9 rules | 4 **self-referencing** (one per port) — that is how `orderd` reaches the others with no CIDRs to maintain — plus 4 for your own IP, plus 1 egress. |
 | **ECR** ×4 | `aws_ecr_repository` | Private registry. `force_delete`, so `destroy` is never blocked. |
 | **ECS cluster** | `aws_ecs_cluster` | The namespace the services live in. |
 | **Capacity providers** | `aws_ecs_cluster_capacity_providers` | `FARGATE` + `FARGATE_SPOT`. |
@@ -792,8 +792,12 @@ gRPC services and the HTTP gateway come out of the **same module**.
 | **Task definition** ×4 | `aws_ecs_task_definition` | The recipe. |
 | **ECS service** ×4 | `aws_ecs_service` | Keeps N tasks alive. |
 
-**22 resource types. No NAT Gateway, no ALB, no RDS by default** — each one
-deliberate.
+**22 resource types, ~45 actual resources** (the ×4s add up). The real
+`terraform destroy` on this reported **45 destroyed**.
+
+The table is the ones worth naming — it leaves out the IAM policy attachments
+and the generated password. **No NAT Gateway, no ALB, and no RDS unless you ask
+for it** — each absence deliberate.
 
 > **Show:** `terraform/modules/network/main.tf` (the self-referencing SG rule)
 > and `terraform/modules/rds/main.tf` (the cost arithmetic in the header)
@@ -1330,78 +1334,54 @@ Two more worth 20 seconds each:
 
 ---
 
-## G4 · This was the demo path. Here is the ideal one.
+## G4 · What changes if you add a load balancer
 
-Everything so far used **bare public IPs**. That is a deliberate demo shortcut,
-not a recommendation — so let me be explicit about both.
+Everything so far used **bare public IPs** — a demo shortcut. The production
+version differs in four places:
 
-| | **This demo** | **What I would actually ship** |
+| | Demo | Production |
 |---|---|---|
-| Public entry | each task's public IP, SG locked to one `/32` | **Route 53 + ACM + ALB (HTTPS)** in front of `gatewayd` |
-| Subnets | public, `assign_public_ip = true` | **private** subnets + VPC endpoints for ECR, S3, logs, Secrets Manager |
-| NAT | none | not needed, because of those endpoints |
-| Service-to-service | Cloud Map DNS + client-side `round_robin` | same, **or** ECS Service Connect |
-| TLS | none | ALB terminates; in-VPC stays plaintext (or mTLS via a mesh) |
-| Database | SQLite on the task, or one small RDS | RDS **Multi-AZ**, backups on, deletion protection **on** |
-| Operator access | public IP + SG rule | **SSM port forwarding** — no public IP, no inbound rule |
+| Getting in | task public IPs, locked to your `/32` | **ALB + a domain** in front of `gatewayd` |
+| Subnets | public | **private**, plus VPC endpoints |
+| Database | SQLite on the task | RDS **Multi-AZ**, backups on |
+| Your access | public IP | **SSM port forwarding** |
 
-**Why the demo skips the ALB:** a gRPC target group *requires* an HTTPS
-listener — *"The only supported listener protocol is HTTPS"* — which needs an
-ACM certificate, which needs a domain. Three moving parts to teach a lesson a
-bare IP already teaches.
+**Why no ALB here:** an ALB gRPC target group needs an HTTPS listener → a
+certificate → a domain. Three things to set up to teach what a bare IP already
+teaches.
 
-> **The one thing you must not copy from this repo into production:** public
-> subnets with public task IPs.
+> **Never copy one thing from this repo into production:** public subnets with
+> public task IPs.
 
 ---
 
-## G5 · So how does load balancing work with N replicas?
+## G5 · An ALB only covers the first hop
 
-**This is the part people get wrong.** An ALB fixes the *edge*. It does nothing
-for service-to-service.
+This is the bit people assume wrong.
 
 ```
-                    Route 53  aws-demo.example.com
-                         |
-                   ALB (HTTPS, ACM cert)          <-- LAYER 1
-                   balances PER REQUEST
-                   target_type = ip
-            +------------+------------+
-            v            v            v
-      gatewayd-1    gatewayd-2    gatewayd-3      3 replicas
+      internet
+         |
+        ALB            <-- balances across gatewayd replicas
+      /  |  \
+   gw-1 gw-2 gw-3
 
-   each gatewayd is itself a gRPC CLIENT:          <-- LAYER 2
-            |            |            |
-            +------------+------------+
-                         |
-              userd.ecom.local  (Cloud Map -> 3 A records)
-            +------------+------------+
-            v            v            v
-        userd-1      userd-2      userd-3         3 replicas
+   each gw is itself a gRPC client
+      /  |  \
+   usr-1 usr-2 usr-3   <-- the ALB is NOT in this path
 ```
 
-**Layer 1 — the edge.** The ALB spreads requests across `gatewayd` replicas.
-Use `least_outstanding_requests`, not `round_robin`: with HTTP/2 one connection
-carries many requests, so counting *connections* tells you nothing about which
-task is busy.
+| Hop | Who balances it |
+|---|---|
+| internet → `gatewayd` | **the ALB**, per request |
+| `gatewayd` → `userd` | **the client itself** — Cloud Map + `round_robin` |
 
-**Layer 2 — inside.** Every `gatewayd` replica opens its own gRPC connections
-to `userd`. **The ALB cannot help here**, so each client balances for itself.
-Two ways:
+So an ALB solves the outside. Inside, every client still has to balance for
+itself — either the two settings we are about to look at, or **ECS Service
+Connect**, which puts a proxy in each task and does it for you.
 
-| | Cloud Map + client `round_robin` | ECS Service Connect |
-|---|---|---|
-| How | `dns:///` resolves all task IPs; the client spreads RPCs | an **Envoy sidecar** per task resolves Cloud Map and balances |
-| Granularity | per RPC | per request, plus retries and outlier detection |
-| Client code | the two settings from the next slides | **none** |
-| Cost | free | CPU and memory for a sidecar in every task |
-
-**This repo uses the first**, because it works anywhere — including off AWS —
-and because it makes the failure visible, which is the next slide.
-
-> **The trap:** 3 × 3 is nine paths, and a load balancer you can see covers
-> only the first hop. If you add an ALB and stop there, the inside of your
-> system is still pinned to one task.
+> Add an ALB and stop there, and the inside of your system is still pinned to
+> one task.
 
 ---
 
