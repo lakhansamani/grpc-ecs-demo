@@ -54,6 +54,13 @@ variable "enable_execute_command" {
   default = true
 }
 
+# RDS is off by default so an accidental apply never creates a billable
+# database. See ../../modules/rds for the cost arithmetic.
+variable "use_rds" {
+  type    = bool
+  default = false
+}
+
 variable "lb_policy" {
   type        = string
   default     = "round_robin"
@@ -64,6 +71,7 @@ module "deployment" {
   source = "../../deployment"
 
   lb_policy = var.lb_policy
+  use_rds   = var.use_rds
 
   environment        = "aws"
   aws_region         = var.aws_region

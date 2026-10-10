@@ -20,6 +20,13 @@ variable "product_desired_count" {
 
 # `-var lb_policy=pick_first` redeploys orderd with the bug, so the
 # load-balancing segment has a "before" to show. See ../../deployment/main.tf.
+# RDS is off by default so an accidental apply never creates a billable
+# database. See ../../modules/rds for the cost arithmetic.
+variable "use_rds" {
+  type    = bool
+  default = false
+}
+
 variable "lb_policy" {
   type    = string
   default = "round_robin"
@@ -43,6 +50,7 @@ module "deployment" {
   product_desired_count = var.product_desired_count
   order_desired_count   = var.order_desired_count
   lb_policy             = var.lb_policy
+  use_rds               = var.use_rds
   gateway_desired_count = 1
 
   # jaeger from compose.yaml, reachable because Ministack places task

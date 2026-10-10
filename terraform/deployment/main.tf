@@ -57,9 +57,13 @@ variable "order_desired_count" {
   default     = 1
   description = "MUST stay 1: orderd writes to SQLite on its own task filesystem."
 
+  # The guard applies ONLY to the SQLite shape, where the database lives on the
+  # task filesystem and N tasks would mean N divergent databases. With
+  # use_rds = true the three services share one instance and orderd scales like
+  # anything else, so the restriction lifts itself.
   validation {
-    condition     = var.order_desired_count == 1
-    error_message = "orderd keeps its database on the task filesystem, so N tasks would mean N divergent databases. Scale userd or productsd instead."
+    condition     = var.order_desired_count == 1 || var.use_rds
+    error_message = "orderd keeps its database on the task filesystem, so N tasks would mean N divergent databases. Either scale userd/productsd instead, or set use_rds = true to give it a shared database."
   }
 }
 
@@ -96,6 +100,15 @@ variable "use_secrets_manager" {
             secret, so scaling still works; you just lose the segment that
             shows the value never entering the image.
   EOT
+}
+
+# RDS is opt-in, and OFF by default, so an accidental apply never creates a
+# billable database. On: one db.t4g.micro with a separate database per service
+# (~$14/month if left running, ~6 cents for a three-hour demo). Off: SQLite on
+# the task filesystem, which is free but means orderd cannot scale.
+variable "use_rds" {
+  type    = bool
+  default = false
 }
 
 variable "jwt_secret_plain" {
@@ -181,6 +194,35 @@ module "cluster" {
   tags             = local.tags
 }
 
+# One instance, one database per service. See modules/rds for the cost
+# arithmetic and the three settings that make `destroy` actually stop the bill.
+module "rds" {
+  count  = var.use_rds ? 1 : 0
+  source = "../modules/rds"
+
+  name                     = "${var.name_prefix}-${var.environment}"
+  vpc_id                   = module.network.vpc_id
+  subnet_ids               = module.network.subnet_ids
+  client_security_group_id = module.network.security_group_id
+  databases                = ["userd", "productsd", "orderd"]
+  tags                     = local.tags
+}
+
+locals {
+  # Postgres when RDS is on, otherwise SQLite on the task. Services read
+  # DB_DRIVER; DB_URL arrives as a SECRET, because it contains a password.
+  db_env = var.use_rds ? {
+    DB_DRIVER    = "postgres"
+    SEED_ON_BOOT = "true" # no baked-in file to seed from, so seed at boot
+  } : {}
+
+  db_secrets = var.use_rds ? {
+    userd     = { DB_URL = module.rds[0].db_url_secret_arns["userd"] }
+    productsd = { DB_URL = module.rds[0].db_url_secret_arns["productsd"] }
+    orderd    = { DB_URL = module.rds[0].db_url_secret_arns["orderd"] }
+  } : { userd = {}, productsd = {}, orderd = {} }
+}
+
 module "secrets" {
   source   = "../modules/secrets"
   count    = var.use_secrets_manager ? 1 : 0
@@ -238,12 +280,16 @@ module "userd" {
     # Must stay below the task's stop_timeout (30s) or the drain is cut off.
     SHUTDOWN_TIMEOUT = "15s"
     },
+    local.db_env,
     var.use_secrets_manager ? {} : { JWT_SECRET = local.jwt_plain_value }
   )
 
   # Every userd task must share one signing secret, or a token minted by one
   # task fails verification on another.
-  secrets = var.use_secrets_manager ? { JWT_SECRET = module.secrets[0].arn } : {}
+  secrets = merge(
+    var.use_secrets_manager ? { JWT_SECRET = module.secrets[0].arn } : {},
+    local.db_secrets.userd,
+  )
 
   log_group_name           = module.cluster.log_group_name
   aws_region               = var.aws_region
@@ -271,14 +317,18 @@ module "productsd" {
   subnet_ids         = module.network.subnet_ids
   security_group_ids = [module.network.security_group_id]
 
-  environment = {
+  environment = merge({
     ENVIRONMENT                 = var.environment
     GRPC_ADDR                   = ":${local.product_port}"
     METRICS_ADDR                = ":9093"
     OTEL_EXPORTER_OTLP_ENDPOINT = var.otlp_endpoint
     GRPC_MAX_CONNECTION_AGE     = "30s"
     SHUTDOWN_TIMEOUT            = "15s"
-  }
+    },
+    local.db_env,
+  )
+
+  secrets = local.db_secrets.productsd
 
   log_group_name           = module.cluster.log_group_name
   aws_region               = var.aws_region
@@ -307,7 +357,7 @@ module "orderd" {
   subnet_ids         = module.network.subnet_ids
   security_group_ids = [module.network.security_group_id]
 
-  environment = {
+  environment = merge({
     ENVIRONMENT = var.environment
     # Cloud Map names, not IPs. dns:/// resolution plus client-side
     # round_robin is what spreads load across the upstream tasks.
@@ -320,7 +370,11 @@ module "orderd" {
     SHUTDOWN_TIMEOUT            = "15s"
     # Only read when it equals "pick_first"; see internal/platform/grpcclient.
     LB_POLICY = var.lb_policy
-  }
+    },
+    local.db_env,
+  )
+
+  secrets = local.db_secrets.orderd
 
   log_group_name           = module.cluster.log_group_name
   aws_region               = var.aws_region
@@ -371,9 +425,15 @@ module "gatewayd" {
 }
 
 module "iam" {
-  source                      = "../modules/iam"
-  name_prefix                 = "${var.name_prefix}-${var.environment}"
-  secret_arns                 = var.use_secrets_manager ? [module.secrets[0].arn] : []
+  source      = "../modules/iam"
+  name_prefix = "${var.name_prefix}-${var.environment}"
+  # The EXECUTION role resolves every injected secret before the container
+  # starts, so it needs each DB_URL ARN as well as the JWT one. Miss this and
+  # the task fails to start with an error that points at the secret, not here.
+  secret_arns = concat(
+    var.use_secrets_manager ? [module.secrets[0].arn] : [],
+    var.use_rds ? values(module.rds[0].db_url_secret_arns) : [],
+  )
   existing_execution_role_arn = var.existing_execution_role_arn
   enable_execute_command      = var.enable_execute_command
   tags                        = local.tags
