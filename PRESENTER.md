@@ -33,14 +33,14 @@ single lines you let land (10 seconds).
 | **40 min** | Core | 3, 13, 25, 31, 39 · and cut `make dev-rest` from Demo 2 |
 | **30 min** | Spine | Also 15, 19, 24, 34, 36 · and Demo 3 (describe it) |
 
-**Never drop:** the promise, the use-case diagram, the boundary test, the
+**Never drop:** what-you-will-leave-with, the use-case diagram, the boundary test, the
 streaming ASK + reveal, "no price in the request", the every-AWS-component
 table, the one-pipeline `diff`, walkthrough E, and the whole `pick_first`
 payoff (setup → ASK → 120/0/0 → the fix) plus the closing line.
 
-**The 20-minute spine:** the promise → use-case diagram → three services →
+**The 20-minute spine:** what-you-will-leave-with → use-case diagram → three services →
 no price in the request → every AWS component → the `diff` → walkthrough E →
-the promise revisited → ASK → 120/0/0 → the fix → green dashboards.
+the default-that-catches-everyone → ASK → 120/0/0 → the fix → green dashboards.
 
 > Slide numbers shifted when the walkthroughs and the health-check slides went
 > in. The per-slide sections below are keyed by **title**, so match on the
@@ -111,25 +111,23 @@ read-only `make ps-aws`. Never run a cold `apply` on venue wifi.
 
 ---
 
-## Slide 2 · Before we start, a promise
+## Slide 2 · What you will leave with
 
-**1:15 · 2:15 · NEVER CUT**
+**1:00 · 2:00**
 
-**This is the hook for the entire talk.** You are opening a loop you close on
-slide 45. Deliver it slowly and do not explain it yet.
+Plain and quick. Three concrete things, no build-up — the content earns
+attention on its own.
 
-> "Before anything else, let me tell you where we're going.
+> "Three things you'll take away. Why gRPC can't run on Lambda, and what that
+> rules out. How one set of Terraform runs against my laptop and against real
+> AWS with one provider block different.
 >
-> Later I'll show you a system where three servers are running. All three
-> healthy. DNS is correct — it hands back all three addresses. And one of them
-> is doing a hundred percent of the work.
->
-> No error. No log line. No failed health check. Nothing in your dashboards."
+> And the third one is the useful one: gRPC's standard client sends every
+> request to one server, even when three healthy ones are registered and DNS
+> hands back all three. Nothing warns you about it. We'll get to what it is and
+> how to fix it."
 
-Pause. Then make it personal — this is what buys their attention:
-
-> "I lost most of a day to this. By the end of this talk you'll recognise it in
-> about ten seconds. Everything in between is how we get there."
+Then move on. Do not oversell it — you cover it properly later.
 
 ---
 
@@ -858,13 +856,14 @@ aws servicediscovery list-services --query 'Services[].Name'
 
 ---
 
-## Slide 43 · Now, the promise from slide 2
+## Slide 43 · The default that catches almost everyone
 
 **1:00 · 62:20 · NEVER CUT**
 
-**Close the loop you opened. Say so explicitly** — the callback is the payoff.
+Back to the third thing from slide 2. Set the scene factually; the numbers do
+the work.
 
-> "Right. Remember the promise from the second slide?"
+> "This is the one I mentioned at the start."
 
 Walk the checklist, ticking each one:
 

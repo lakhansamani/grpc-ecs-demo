@@ -9,7 +9,8 @@ LOCAL_AWS := AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGIO
              aws --endpoint-url http://localhost:4566
 
 .PHONY: local-up local-down tf-local-apply tf-local-destroy dns demo demo-load wait-ready \
-        scale test ps ps-aws aws-ip forward forward-stop images api-coverage show-guard \
+        scale test ps ps-aws aws-ip forward forward-stop images images-push \
+        api-coverage show-guard \
         proto proto-breaking ts-demo
 
 local-up:                      ## emulator + observability
@@ -197,6 +198,45 @@ images:
 	docker build --platform linux/arm64 -f build/Dockerfile.stateless \
 	  --build-arg SERVICE=gatewayd -t gatewayd:0.1.0 -t localhost:4566/gatewayd:0.1.0 .
 	@docker images --format '{{.Repository}}:{{.Tag}}\t{{.Size}}' | grep -E '^(userd|productsd|orderd|gatewayd):0.1.0'
+
+# Build the same four images and push them to ECR, tagged for your account.
+#
+# Reads the account and region from your CURRENT aws credentials, so the thing
+# it pushes to is the thing `terraform apply` will deploy from. Run
+# `aws sts get-caller-identity` first and read the account number.
+#
+#   make images-push                 # uses AWS_REGION or us-east-1
+#   AWS_REGION=eu-central-1 make images-push
+IMAGE_TAG ?= 0.1.0
+images-push:
+	@command -v aws >/dev/null || { echo "aws CLI not found"; exit 1; }
+	@set -euo pipefail; \
+	region="$${AWS_REGION:-us-east-1}"; \
+	account=$$(aws sts get-caller-identity --query Account --output text); \
+	ecr="$$account.dkr.ecr.$$region.amazonaws.com"; \
+	echo "account $$account  region $$region"; \
+	echo "pushing to $$ecr"; \
+	aws ecr get-login-password --region "$$region" \
+	  | docker login --username AWS --password-stdin "$$ecr" >/dev/null; \
+	docker build --platform linux/arm64 -f build/Dockerfile.seeded \
+	  --build-arg SERVICE=userd --build-arg SEED_FLAG=-user-db --build-arg DB_FILE=user.db \
+	  -t "$$ecr/userd:$(IMAGE_TAG)" . ; \
+	docker build --platform linux/arm64 -f build/Dockerfile.seeded \
+	  --build-arg SERVICE=productsd --build-arg SEED_FLAG=-product-db --build-arg DB_FILE=product.db \
+	  -t "$$ecr/productsd:$(IMAGE_TAG)" . ; \
+	docker build --platform linux/arm64 -f build/Dockerfile.stateful \
+	  --build-arg SERVICE=orderd -t "$$ecr/orderd:$(IMAGE_TAG)" . ; \
+	docker build --platform linux/arm64 -f build/Dockerfile.stateless \
+	  --build-arg SERVICE=gatewayd -t "$$ecr/gatewayd:$(IMAGE_TAG)" . ; \
+	for svc in userd productsd orderd gatewayd; do \
+	  docker push "$$ecr/$$svc:$(IMAGE_TAG)"; \
+	done; \
+	echo; \
+	echo "Put these in terraform/envs/aws/terraform.tfvars:"; \
+	echo "  user_image    = \"$$ecr/userd:$(IMAGE_TAG)\""; \
+	echo "  product_image = \"$$ecr/productsd:$(IMAGE_TAG)\""; \
+	echo "  order_image   = \"$$ecr/orderd:$(IMAGE_TAG)\""; \
+	echo "  gateway_image = \"$$ecr/gatewayd:$(IMAGE_TAG)\""
 
 dev-gatewayd:
 	USER_ADDR="127.0.0.1:50051" PRODUCT_ADDR="127.0.0.1:50053" ORDER_ADDR="127.0.0.1:50052" \

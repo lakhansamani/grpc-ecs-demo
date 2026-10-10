@@ -32,21 +32,18 @@ on the slide. Where something is a shortcut, the slide says so.
 
 ---
 
-## Before we start, a promise
+## What you will leave with
 
-Later in this talk I will show you a system where:
+1. **Why a gRPC service cannot run on Lambda** — and what that rules out.
+2. **How to run one set of Terraform against a laptop and against AWS**,
+   differing by a single provider block.
+3. **The default that catches almost everyone:** gRPC's standard client sends
+   every request to *one* server, even when three healthy ones are registered
+   and DNS returns all three. Nothing warns you. We will cover what it is and
+   how to fix it.
 
-- **Three servers are running.** All three healthy.
-- **DNS is correct.** It returns all three addresses.
-- **One of them is doing 100% of the work.**
-
-No error. No log line. No failed health check. Nothing in your dashboards.
-
-**I lost most of a day to this.** It is the single most common way a gRPC
-service gets deployed wrong, and by the end of this talk you will recognise it
-in about ten seconds.
-
-Everything else is how we get there.
+Everything is in the repo, and every number in these slides came out of a
+terminal there.
 
 ---
 
@@ -1408,18 +1405,18 @@ and because it makes the failure visible, which is the next slide.
 
 ---
 
-# Now, the promise from slide 2
+# The default that catches almost everyone
 
 ## The setup
 
-`userd` is scaled to **3 tasks**.
+`userd` is scaled to **3 tasks**, and everything about the setup is correct.
 
 | Check | Result |
 |---|---|
 | Tasks running | **3 of 3** ✅ |
 | Cloud Map instances healthy | **3 of 3** ✅ |
 | DNS answer for `userd.ecom.local` | **3 A records** ✅ |
-| Client configured with a load balancer | not needed — gRPC does this itself |
+| Client configured with a load balancer | none — gRPC balances client-side |
 
 I send **120 requests** through `orderd`, and every one of them makes `orderd`
 call `userd`.
