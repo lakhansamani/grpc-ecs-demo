@@ -66,6 +66,13 @@ func run(log *slog.Logger) error {
 		}
 	}()
 
+	// Each service owns its OWN database on one shared instance. Terraform
+	// cannot create them (CREATE DATABASE is SQL, not an AWS API call), so the
+	// service does it at boot. No-op on SQLite. See store.EnsureDatabase.
+	if err := store.EnsureDatabase(store.Config{Driver: dbDriver, URL: dbURL}); err != nil {
+		return err
+	}
+
 	db, err := store.Open(store.Config{Driver: dbDriver, URL: dbURL}, product.Models()...)
 	if err != nil {
 		return err
