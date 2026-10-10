@@ -570,7 +570,7 @@ running it. Neither unit tests nor `terraform validate` would have surfaced them
 
 ### 13.3 Real AWS — PASSED, then destroyed (2026-10-09)
 
-Account `272639014758`, **us-east-1**, ~2 minutes to apply.
+A personal sandbox account, **us-east-1**, ~2 minutes to apply.
 
 | Check | Result |
 |---|---|

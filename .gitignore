@@ -1,4 +1,9 @@
 # local state
+# terraform.tfvars holds YOUR account's image URIs and YOUR public IP. It is
+# environment-specific and personal; keep it out of the repo. minimal.tfvars is
+# checked in on purpose - it is the permission-fallback switches, no secrets.
+terraform.tfvars
+*.auto.tfvars
 .terraform/
 *.tfstate
 *.tfstate.*
