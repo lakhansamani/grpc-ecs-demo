@@ -63,8 +63,38 @@ make forward          # publish ports so Postman/grpcurl can reach the tasks
 make api-coverage     # every RPC and every REST route, and what was missed
 ```
 
-Full walkthrough — local inspection of every AWS component, manual tests and
-the stage-by-stage demo: [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md).
+### Poke it by hand
+
+No `.proto` file needed — every service registers gRPC server reflection:
+
+```sh
+make forward                                     # awsvpc tasks have no host port
+
+grpcurl -plaintext localhost:50053 list          # discover the API
+grpcurl -plaintext -d '{"service":"userd"}' localhost:50051 grpc.health.v1.Health/Check
+grpcurl -plaintext -d '{"query":"cancelling"}' \
+  localhost:50053 product.v1.ProductService/SearchProducts
+
+TOKEN=$(grpcurl -plaintext -d '{"email":"demo@example.com","password":"demo-password"}' \
+  localhost:50051 user.v1.UserService/Login | jq -r .token)
+
+grpcurl -plaintext -H "authorization: Bearer $TOKEN" \
+  -d '{"items":[{"product_id":"p-1001","quantity":1}],"idempotency_key":"k1"}' \
+  localhost:50052 order.v1.OrderService/CreateOrder
+
+# the same flow over REST, through the generated gateway
+curl -s "http://localhost:8080/v1/products:search?query=cancelling" | jq -r '.products[].title'
+
+# and the one RPC that is deliberately NOT public
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -X POST http://localhost:8080/v1/products:checkAvailability -d '{}'   # -> 404
+```
+
+**Every command, including against real AWS by bare IP:**
+[`INSTRUCTIONS.md`](INSTRUCTIONS.md).
+
+Full walkthrough — local inspection of every AWS component and the
+stage-by-stage demo: [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md).
 Architecture and what each AWS component is for:
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -155,6 +185,7 @@ Each of these is a trade-off, not an accident. `SPEC.md` has the reasoning.
 |---|---|
 | [`PRESENTATION.md`](PRESENTATION.md) | the talk itself — 21 slides with speaker notes. Renders with Marp, reads fine on GitHub |
 | [`SPEC.md`](SPEC.md) | the full specification, with every claim marked verified or not |
+| [`INSTRUCTIONS.md`](INSTRUCTIONS.md) | **manual testing.** Every `grpcurl` and `curl` command by hand, locally and on AWS by bare IP — plus how health checks are wired and what the production shape would be |
 | [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md) | **start here.** Fresh-laptop command sequence, inspecting every AWS component locally, manual tests, and the demo beat by beat |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | the diagram, and what ECS / Fargate / task definition / Route 53 each are, why they are here and how they are used |
 | [`docs/DEPLOY_AWS.md`](docs/DEPLOY_AWS.md) | step by step onto a real AWS account, and how to tear it down |

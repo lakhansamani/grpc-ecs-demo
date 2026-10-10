@@ -9,7 +9,7 @@ LOCAL_AWS := AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGIO
              aws --endpoint-url http://localhost:4566
 
 .PHONY: local-up local-down tf-local-apply tf-local-destroy dns demo demo-load wait-ready \
-        scale test ps ps-aws forward forward-stop images api-coverage show-guard \
+        scale test ps ps-aws aws-ip forward forward-stop images api-coverage show-guard \
         proto proto-breaking ts-demo
 
 local-up:                      ## emulator + observability
@@ -73,6 +73,12 @@ ps:
 # Same, against real AWS (no endpoint override).
 ps-aws:
 	@CLUSTER=ecom-aws bash scripts/ps.sh
+
+# Print every task's PUBLIC IP:port on AWS, ready to paste into grpcurl/curl.
+# There is no load balancer and no domain here, so addresses change whenever a
+# task is replaced - re-run this after a deploy or a scale event.
+aws-ip:
+	@bash scripts/aws-endpoints.sh
 
 test:
 	go test ./...

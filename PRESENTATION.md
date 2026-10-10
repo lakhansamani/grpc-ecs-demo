@@ -272,6 +272,10 @@ message RequestedItem {
 > Nobody should write a client from a wiki page that was last accurate four
 > months ago.
 
+> **Show:** `proto/order/v1/order.proto` → then `buf.gen.yaml` → then
+> `gen/go/order/v1/order_grpc.pb.go` (scroll, do not read) and
+> `gen/openapi/api.swagger.json`
+
 ---
 
 ## Let me be honest about performance
@@ -324,6 +328,8 @@ CockroachDB, Vitess, Thanos, Bazel, Envoy, OpenTelemetry.
 Protos are in `docs/evidence/`. The counts reproduce with one `grep` — **please
 go check me.**
 
+> **Show:** `ls docs/evidence/` and one `grep -c '^  rpc ' docs/evidence/Temporal.proto`
+
 **Two conclusions.** Streaming is a specialist tool, not the reason to adopt
 gRPC. And **not one** of these 14 exposes gRPC to the public internet.
 
@@ -353,6 +359,9 @@ So something has to translate. **Three real options:**
 
 Connect's own docs say it interops *"with `grpc-web` frontends without the need
 for an intermediary proxy (such as Envoy)."*
+
+> **Show:** `cmd/gatewayd/main.go` — about 100 lines, and none of the routing is
+> hand-written
 
 ---
 
@@ -394,6 +403,9 @@ rpc CheckAvailability(CheckAvailabilityRequest) returns (CheckAvailabilityRespon
 REST  -> 404
 gRPC  -> works
 ```
+
+> **Show:** `proto/product/v1/product.proto` — the four annotated RPCs, then the
+> un-annotated one with its comment
 
 So the proto itself is the access-control decision, and you can read it in a
 code review.
@@ -477,10 +489,98 @@ place — a *new* task gets the new revision.
 **And you still own** everything **inside** your image: your base image, your
 packages, your CVEs.
 
+> **Show:** `terraform/modules/ecs-service/main.tf` — `runtime_platform`,
+> `requires_compatibilities`, `stopTimeout`
+
 > **Serverless does not mean nobody patches.** It means AWS patches their half,
 > kills your task to do it, and you still patch yours.
 >
 > Which is why graceful shutdown is not optional. Remember that.
+
+---
+
+## How health checks are actually wired here
+
+**What:** the same question — *is this task alive?* — asked at **four**
+independent layers.
+
+```
+ 1. YOUR CODE      grpc.health.v1.Health          registered in grpcserver
+ 2. THE CONTAINER  task definition healthCheck -> /healthcheck binary
+ 3. SERVICE DISCOVERY  Cloud Map takes ECS's verdict -> DNS answers or not
+ 4. (production)   ALB target group -> /pkg.Service/Method
+```
+
+**Why four?** Because each one controls something different:
+
+| Layer | If it says unhealthy |
+|---|---|
+| **1 · app** | callers and every layer below learn something is wrong |
+| **2 · container** | **ECS replaces the task** |
+| **3 · Cloud Map** | the task is **removed from DNS**, so no new client reaches it |
+| **4 · ALB** | the target stops receiving requests |
+
+**How:**
+
+```go
+// 1. in grpcserver — and only AFTER everything is wired up
+hs := health.NewServer()
+healthpb.RegisterHealthServer(s, hs)
+hs.SetServingStatus(serviceName, healthpb.HealthCheckResponse_SERVING)
+```
+
+```hcl
+# 2. in the task definition. The image is DISTROLESS - no shell, no curl, no
+# grpc-health-probe - so a tiny Go binary is baked in instead.
+healthCheck = {
+  command     = ["CMD", "/healthcheck", "-addr", "localhost:50051", "-service", "userd"]
+  interval    = 10
+  retries     = 3
+  startPeriod = 10
+}
+```
+
+`gatewayd` serves HTTP, not gRPC, so the same binary takes `-http
+http://localhost:8080/healthz`. One `protocol` variable in the module picks
+which.
+
+> **Show:** `cmd/healthcheck/main.go` — 80 lines, and note it dials
+> `passthrough:///`. This probe must hit **its own container**, so DNS
+> resolution and load balancing would be actively wrong here.
+
+---
+
+## The health check is also how you shut down cleanly
+
+On `SIGTERM`, the **order** matters, and it is the opposite of what feels
+natural:
+
+```go
+// 1. fail health checks FIRST - stop being given new work
+hs.SetServingStatus(name, healthpb.HealthCheckResponse_NOT_SERVING)
+hs.Shutdown()
+
+// 2. THEN drain in-flight RPCs
+GracefulStop()      // bounded by SHUTDOWN_TIMEOUT
+
+// 3. hard stop as a backstop
+Stop()
+```
+
+Flip 1 and 2 and you keep accepting new requests while trying to drain.
+
+And the two timeouts have to agree:
+
+```
+stopTimeout      = 30   # ECS: how long it waits before SIGKILL
+SHUTDOWN_TIMEOUT = 15s  # the app: how long it drains
+```
+
+> If `stopTimeout` is **shorter** than your drain, ECS kills you mid-drain and
+> every line of graceful-shutdown code you wrote did nothing.
+>
+> Remember slide 24: AWS **retires your task** to patch the platform. This is
+> the code path that makes that a non-event.
 
 ---
 
@@ -531,6 +631,9 @@ graph TB
 
 **Nobody in this diagram knows anybody's IP address.** They dial names.
 
+> **Show:** `internal/order/service.go` — `CreateOrder`, the two hops, and the
+> total computed from catalogue prices
+
 ---
 
 ## The request has no price in it
@@ -579,6 +682,9 @@ first call   -> Order abc123, idempotentReplay = false
 same key     -> Order abc123, idempotentReplay = true    <- no second order
 ```
 
+> **Show:** `internal/order/service.go` — the pre-check, then the
+> `gorm.ErrDuplicatedKey` fallback
+
 Three details that matter in the code:
 
 - **Required.** No key → `InvalidArgument`. A retry-unsafe order API is a bug.
@@ -624,6 +730,9 @@ this badly:
 > **Because it writes to a file inside the task.** Three copies would be three
 > different databases.
 
+> **Show:** `build/Dockerfile.seeded` vs `build/Dockerfile.stateful` — one per
+> storage shape, not per service
+
 **Give it a managed database and `orderd` scales like the others.** SQLite on
 the task is a demo shortcut that keeps the AWS deploy at ~2 minutes instead of
 ~10. Terraform refuses to scale it, so the shortcut cannot bite by accident:
@@ -660,6 +769,9 @@ terraform/
 variable switches the port mapping and the health-check mode — so the three
 gRPC services and the HTTP gateway come out of the **same module**.
 
+> **Show:** `tree terraform/ -L 3`, then `terraform/deployment/main.tf` — scroll
+> past the four `module "…"` blocks so they see the repetition is deliberate
+
 ---
 
 ## Every AWS component this creates
@@ -683,7 +795,11 @@ gRPC services and the HTTP gateway come out of the **same module**.
 | **Task definition** ×4 | `aws_ecs_task_definition` | The recipe. |
 | **ECS service** ×4 | `aws_ecs_service` | Keeps N tasks alive. |
 
-**22 resource types. No NAT Gateway, no ALB, no RDS** — each one deliberate.
+**22 resource types. No NAT Gateway, no ALB, no RDS by default** — each one
+deliberate.
+
+> **Show:** `terraform/modules/network/main.tf` (the self-referencing SG rule)
+> and `terraform/modules/rds/main.tf` (the cost arithmetic in the header)
 
 ---
 
@@ -707,6 +823,9 @@ docker inspect <task> | grep AWS_CONTAINER_CREDENTIALS
 
 > **You never created a key, so there is none to leak.**
 
+> **Show:** `terraform/modules/iam/main.tf` — the two roles, and the task role
+> with nothing attached
+
 ---
 
 ## Cloud Map is just DNS
@@ -719,6 +838,10 @@ userd.ecom.local:50051
 
 ECS registers each task's IP with Cloud Map; Cloud Map maintains the A records
 in a Route 53 private hosted zone. Tasks come and go; the name does not.
+
+> **Show:** `terraform/modules/ecs-service/main.tf` →
+> `aws_service_discovery_service`, and the big comment above
+> `health_check_custom_config`
 
 ```hcl
 routing_policy = "MULTIVALUE"          # return EVERY healthy task
@@ -817,76 +940,471 @@ secret injection, health checks, graceful shutdown, metrics, traces.
 
 ---
 
-# Part 7 · Running it
+# Part 7 · Seeing it for yourself
 
-## Demo 1 — Is this really ECS, or just docker compose?
+## The tour, in the order it makes sense
+
+Seven walkthroughs. Each one answers the same three questions.
+
+| | What we look at | Why it is next |
+|---|---|---|
+| **A** | The contract — `.proto` | Everything else is generated from it |
+| **B** | The generated code | So you believe nobody hand-wrote the gateway |
+| **C** | The Go implementation | Where the two hops and the money rules live |
+| **D** | The Terraform | How it gets to Fargate |
+| **E** | Bring it up locally | Real ECS tasks, on a laptop |
+| **F** | Poke it by hand | `grpcurl`, `curl`, Postman |
+| **G** | The same thing on real AWS | One provider block different |
+
+Every command here is also in **`INSTRUCTIONS.md`**, so nobody has to
+photograph a slide.
+
+---
+
+## A · The contract
+
+**What:** three `.proto` files. The only interface code written by hand.
+
+**Why:** if the contract is the source of truth, then the server, the client,
+the REST routes and the docs cannot disagree with each other — they are all
+built from this.
+
+**How:**
 
 ```sh
-make ps
+ls proto/*/v1/*.proto
+$EDITOR proto/order/v1/order.proto
 ```
 
-**The task describes itself** — nothing in our code sets this:
+Three things to point at, in this order:
 
-```
-ECS_CONTAINER_METADATA_URI_V4=http://.../v4/Iw-s54...
-  Cluster : arn:aws:ecs:us-east-1:...:cluster/ecom-local
-  Family  : userd rev 1
-```
+1. `rpc CreateOrder(CreateOrderRequest) returns (CreateOrderResponse)` — a
+   function, not a URL
+2. `message RequestedItem { product_id, quantity }` — **no price field**
+3. `enum RejectionReason` — out of stock is a *value*, not an error
 
-**And credentials arrive with no key existing anywhere:**
+Then the one in `product.proto` that is deliberately **not** public:
 
-```
-AWS_CONTAINER_CREDENTIALS_FULL_URI=http://.../v2/credentials/46e1d1eb-...
+```sh
+grep -B4 "rpc CheckAvailability" proto/product/v1/product.proto
 ```
 
 ---
 
-## Demo 2 — The code, running
+## B · The generated code
+
+**What:** five outputs from one source.
+
+**Why:** "generated" is easy to claim and easy to doubt. Showing the generated
+gateway is what makes the claim land — and it is the file nobody has to review.
+
+**How:**
 
 ```sh
-make demo        # over gRPC
-make dev-rest    # the same flow over REST
+cat buf.gen.yaml                 # five plugins, one source
+make proto                       # regenerate everything
+
+tree gen -L 3
+wc -l gen/go/order/v1/*.go       # scroll it, do NOT read it
+head -40 gen/openapi/api.swagger.json
+ls clients/node/src/gen          # the SAME protos, in TypeScript
 ```
 
-```
-search  -> Wireless Noise Cancelling Headphones, Noise Cancelling Earbuds Ultra
-login   -> token acquired
-order   -> ORDER_STATUS_CONFIRMED  total=36997.0 INR  (2 lines priced by productsd)
-replay  -> same order returned (replay=True)
-reject  -> ORDER_STATUS_REJECTED | REJECTION_REASON_OUT_OF_STOCK
-no token-> Unauthenticated, as expected
-```
+Then prove the contract is enforced, not advisory:
 
-Then the internal RPC, two ways:
-
+```sh
+make proto-breaking              # rename a proto field -> CI fails
 ```
-REST  -> 404        gRPC  -> works
-```
-
-And the same flow from **generated TypeScript**: `make ts-demo`
 
 ---
 
-## Demo 3 — The same Terraform, against real AWS
+## C · The Go implementation
+
+**What:** the order path, and the two bits of platform code that matter on ECS.
+
+**Why:** this is where the business rules and the ECS-specific lessons live. The
+rest of the Go is ordinary.
+
+**How — in this order:**
+
+```sh
+# 1. the two hops, and the total computed from CATALOGUE prices
+$EDITOR internal/order/service.go          # CreateOrder
+
+# 2. idempotency: a pre-check AND a unique-index fallback, because they race
+grep -n "IdempotencyKey\|ErrDuplicatedKey" internal/order/service.go
+
+# 3. THE load-balancing fix (round_robin + the dns:/// prefix)
+$EDITOR internal/platform/grpcclient/grpcclient.go
+
+# 4. graceful shutdown, in the right order: NOT_SERVING, drain, stop
+$EDITOR internal/platform/grpcserver/server.go
+
+# 5. search on two engines: FTS5 and postgres tsvector
+$EDITOR internal/product/store.go          # BuildSearchIndex, searchPostgres
+```
+
+---
+
+## D · The Terraform
+
+**What:** six modules, one deployment, two environments.
+
+**Why:** it is the only part that differs between a laptop and production — and
+it differs by one file.
+
+**How:**
+
+```sh
+tree terraform -L 3
+
+$EDITOR terraform/deployment/main.tf            # the four module "…" blocks
+$EDITOR terraform/modules/ecs-service/main.tf   # task definition + service
+$EDITOR terraform/modules/network/main.tf       # the self-referencing SG rule
+$EDITOR terraform/modules/iam/main.tf           # execution role vs task role
+$EDITOR terraform/modules/rds/main.tf           # the cost arithmetic, up top
+
+# THE SLIDE:
+diff terraform/envs/local/provider.tf terraform/envs/aws/provider.tf
+```
+
+Then the guard that stops you doing the wrong thing:
+
+```sh
+make show-guard
+```
+
+---
+
+## E · Bring it up locally
+
+**What:** real ECS tasks, real task definitions, on your laptop.
+
+**Why:** the point is not that it is a simulator. The point is that it is the
+**same Terraform** — so what you learn here transfers.
+
+**How:**
+
+```sh
+make test              # 8 packages, no Docker, no AWS
+make local-up          # emulator :4566, jaeger :16686, prometheus :9090
+make images            # four ARM64 distroless images
+make tf-local-apply    # terraform apply -> ECS tasks, then wait-ready
+make ps                # seven proofs that this is ECS
+make forward           # publish ports (awsvpc tasks have no host port)
+```
+
+> `tf-local-apply` ends with `make wait-ready`, which blocks until `orderd` can
+> actually reach `userd`. Without it the first command after a deploy can fail
+> while DNS is still settling.
+
+---
+
+## E2 · The same AWS CLI, pointed at your laptop
+
+**What:** `aws ecs`, `aws ecr`, `aws servicediscovery`, `aws logs` — unchanged.
+
+**Why:** this is the strongest argument for emulating rather than mocking.
+**The commands you practise are the commands you will run in production.**
+
+**How** — set this once, and every command below is what you would run on real
+AWS minus the last line:
+
+```sh
+export AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test
+export AWS_DEFAULT_REGION=us-east-1
+export AWS_ENDPOINT_URL=http://localhost:4566
+```
+
+```sh
+aws ecs describe-services --cluster ecom-local \
+  --services userd productsd orderd gatewayd \
+  --query 'services[].{Service:serviceName,Desired:desiredCount,Running:runningCount}' --output table
+
+aws ecs describe-task-definition --task-definition userd \
+  --query 'taskDefinition.{Family:family,Rev:revision,Net:networkMode,Arch:runtimePlatform.cpuArchitecture}'
+
+aws ecr describe-repositories --query 'repositories[].repositoryName'
+aws servicediscovery list-services --query 'Services[].Name'
+aws secretsmanager list-secrets --query 'SecretList[].Name'
+aws iam list-roles --query 'Roles[?starts_with(RoleName,`ecom-`)].RoleName'
+aws logs tail /ecs/ecom-local --since 5m
+```
+
+> There is **no web console** for the emulator. Inspection is the CLI plus
+> `docker ps` — and that is the honest trade, because the CLI is the part that
+> transfers.
+
+---
+
+## F1 · Poke it by hand — gRPC
+
+**What:** `grpcurl`, with no `.proto` file.
+
+**Why:** every service registers **server reflection**, so the API documents
+itself. This is also how you debug a service you did not write.
+
+**How:**
+
+```sh
+U=localhost:50051; O=localhost:50052; P=localhost:50053
+
+grpcurl -plaintext $P list                                   # discover
+grpcurl -plaintext $P describe product.v1.ProductService     # full signatures
+grpcurl -plaintext -d '{"service":"userd"}' $U grpc.health.v1.Health/Check
+
+grpcurl -plaintext -d '{"query":"cancelling"}' $P product.v1.ProductService/SearchProducts
+grpcurl -plaintext -d '{"query":"head"}'       $P product.v1.ProductService/SearchProducts
+
+TOKEN=$(grpcurl -plaintext -d '{"email":"demo@example.com","password":"demo-password"}' \
+  $U user.v1.UserService/Login | jq -r .token)
+
+grpcurl -plaintext -H "authorization: Bearer $TOKEN" \
+  -d '{"items":[{"product_id":"p-1001","quantity":1}],"idempotency_key":"live-1"}' \
+  $O order.v1.OrderService/CreateOrder | jq '.order | {status, totalMinor}'
+```
+
+Run the last one **twice** — same key, same order, `idempotentReplay: true`.
+
+**And the one that is not public:**
+
+```sh
+grpcurl -plaintext -d '{"items":[{"product_id":"p-1001","quantity":2}]}' \
+  $P product.v1.ProductService/CheckAvailability     # works
+```
+
+---
+
+## F2 · Poke it by hand — REST
+
+**What:** the same services over HTTP/JSON, through the generated gateway.
+
+**Why:** it is what a browser would actually call — and it proves the REST
+surface is a side effect of the contract, not a second implementation.
+
+**How:**
+
+```sh
+BASE=http://localhost:8080
+
+curl -s "$BASE/healthz"
+curl -s "$BASE/v1/products:search?query=cancelling" | jq -r '.products[].title'
+curl -s "$BASE/v1/products/p-1005" | jq '.product | {title, stock}'
+
+TOKEN=$(curl -s -X POST "$BASE/v1/sessions" -H 'Content-Type: application/json' \
+  -d '{"email":"demo@example.com","password":"demo-password"}' | jq -r .token)
+
+curl -s "$BASE/v1/users/me" -H "Authorization: Bearer $TOKEN" | jq '.user'
+
+curl -s -X POST "$BASE/v1/orders" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"items":[{"productId":"p-1001","quantity":1}],"idempotencyKey":"rest-live-1"}' \
+  | jq '.order.status'
+```
+
+**The payoff — the same RPC, two answers:**
+
+```sh
+curl -s -o /dev/null -w 'REST -> %{http_code}\n' \
+  -X POST "$BASE/v1/products:checkAvailability" -d '{}'       # -> 404
+```
+
+---
+
+## F3 · The whole flow, and Postman
+
+**What:** the scripted version, then a human-facing client.
+
+**Why:** the scripts are what you trust; Postman is what your frontend team
+will actually use.
+
+**How:**
+
+```sh
+make demo              # gRPC: browse, login, order, replay, 3 rejections
+make dev-rest          # the identical flow over REST
+make ts-demo           # the identical flow from generated TypeScript
+make api-coverage      # all 10 RPCs + all 9 REST routes + the 404 check -> 20/20
+```
+
+**Postman, no `.proto` import:**
+
+1. New → **gRPC Request** → `localhost:50053`
+2. Tick **"Using server reflection"**
+3. Pick `product.v1.ProductService/SearchProducts`, body `{"query":"cancelling"}`
+4. For `orderd`, add metadata `authorization: Bearer <token>`
+
+For REST, import `gen/openapi/api.swagger.json` — all nine routes with schemas.
+
+---
+
+## G1 · The same Terraform, on real AWS
+
+**What:** one `terraform apply`, a different provider block.
+
+**Why:** this is the claim the whole talk rests on. Run it, do not assert it.
+
+**How** (pre-provisioned the day before — never a cold apply on venue wifi):
 
 ```sh
 cd terraform/envs/aws
-terraform plan      # same modules. no endpoints block.
-terraform apply     # ~2 minutes
-make ps-aws
+terraform plan          # read it: ~1 VPC, 4 task definitions, 4 services
+terraform apply         # ~2 min without RDS, ~7-10 min with it
+
+cd ../../..
+make ps-aws             # the same seven proofs, now against real ECS
 ```
 
-What changed between laptop and AWS: **one provider block.**
+What is real now that was substituted locally:
 
-What is real now that was substituted before:
-
-- **Cloud Map does the DNS for real** — no alias shim
+- **Cloud Map does the DNS for real** — no Docker-alias shim
 - `healthStatus: HEALTHY`, `launchType: FARGATE`
-- Tasks spread across **two availability zones**
+- Tasks across **two availability zones**
 
 ```sh
-terraform destroy   # before leaving the venue
+terraform destroy       # before leaving the venue. Actually run it.
 ```
+
+---
+
+## G2 · Reaching it with no load balancer and no domain
+
+**What:** `grpcurl` and `curl` straight at a task's public IP.
+
+**Why:** because you do not need an ALB, a domain or a certificate to run gRPC
+or HTTP. An ALB gRPC target group **requires** an HTTPS listener, which needs a
+cert, which needs a domain — three moving parts for a lesson a bare IP already
+teaches.
+
+**How:**
+
+```sh
+make aws-ip
+```
+
+```
+SERVICE     PORT  PUBLIC IP    TRY THIS
+userd       50051 54.x.x.x     grpcurl -plaintext 54.x.x.x:50051 list
+gatewayd    8080  18.x.x.x     curl http://18.x.x.x:8080/healthz
+```
+
+Then **every command from F1 and F2 works unchanged** — just repoint the
+variables:
+
+```sh
+U=54.x.x.x:50051; O=44.x.x.x:50052; P=3.x.x.x:50053
+BASE=http://18.x.x.x:8080
+REST_BASE="$BASE" bash scripts/rest-smoke.sh
+```
+
+**The honest cost of skipping the ALB:** `awsvpc` gives every task its own ENI
+and its own public IP, and that IP changes whenever the task is replaced. So
+you re-run `make aws-ip` instead of writing it down. And the only reason those
+IPs answer at all is that the security group allows your `/32` —
+`operator_ingress_cidrs` is empty by default.
+
+---
+
+## G3 · The AWS console tour
+
+**What:** the same four facts, in the UI, for people who live there.
+
+**Why:** half the room will go back to the console on Monday. Show them where
+the things you have been naming actually are.
+
+**How** — in this order, four tabs:
+
+| Console page | Point at |
+|---|---|
+| **ECS → Clusters → `ecom-aws` → Services** | Desired vs Running. Then **Deployments** — ECS reconciling, not you |
+| **ECS → Task definitions → `userd`** | **Revisions.** Then JSON: `awsvpc`, `FARGATE`, `ARM64`, and `secrets` holding an **ARN** |
+| **ECS → the task → Networking** | Its own ENI and private IP. **This is `awsvpc`.** |
+| **Cloud Map → Namespaces → `ecom.local` → `userd`** | **Instances** — one per task, and the **health status** that decides whether DNS answers |
+
+Two more worth 20 seconds each:
+
+- **Secrets Manager → `ecom-aws-jwt-secret`** — "Retrieve secret value" is a
+  deliberate click. The task never needed it.
+- **CloudWatch → Log groups → `/ecs/ecom-aws`** — one stream per task, and this
+  is the only place a crash-looping task explains itself.
+
+> **Do not** demo the console as the primary tool. It is lovely for *looking*
+> and useless for *reproducing* — which is the whole reason Part 6 exists.
+
+---
+
+## G4 · This was the demo path. Here is the ideal one.
+
+Everything so far used **bare public IPs**. That is a deliberate demo shortcut,
+not a recommendation — so let me be explicit about both.
+
+| | **This demo** | **What I would actually ship** |
+|---|---|---|
+| Public entry | each task's public IP, SG locked to one `/32` | **Route 53 + ACM + ALB (HTTPS)** in front of `gatewayd` |
+| Subnets | public, `assign_public_ip = true` | **private** subnets + VPC endpoints for ECR, S3, logs, Secrets Manager |
+| NAT | none | not needed, because of those endpoints |
+| Service-to-service | Cloud Map DNS + client-side `round_robin` | same, **or** ECS Service Connect |
+| TLS | none | ALB terminates; in-VPC stays plaintext (or mTLS via a mesh) |
+| Database | SQLite on the task, or one small RDS | RDS **Multi-AZ**, backups on, deletion protection **on** |
+| Operator access | public IP + SG rule | **SSM port forwarding** — no public IP, no inbound rule |
+
+**Why the demo skips the ALB:** a gRPC target group *requires* an HTTPS
+listener — *"The only supported listener protocol is HTTPS"* — which needs an
+ACM certificate, which needs a domain. Three moving parts to teach a lesson a
+bare IP already teaches.
+
+> **The one thing you must not copy from this repo into production:** public
+> subnets with public task IPs.
+
+---
+
+## G5 · So how does load balancing work with N replicas?
+
+**This is the part people get wrong.** An ALB fixes the *edge*. It does nothing
+for service-to-service.
+
+```
+                    Route 53  aws-demo.example.com
+                         |
+                   ALB (HTTPS, ACM cert)          <-- LAYER 1
+                   balances PER REQUEST
+                   target_type = ip
+            +------------+------------+
+            v            v            v
+      gatewayd-1    gatewayd-2    gatewayd-3      3 replicas
+
+   each gatewayd is itself a gRPC CLIENT:          <-- LAYER 2
+            |            |            |
+            +------------+------------+
+                         |
+              userd.ecom.local  (Cloud Map -> 3 A records)
+            +------------+------------+
+            v            v            v
+        userd-1      userd-2      userd-3         3 replicas
+```
+
+**Layer 1 — the edge.** The ALB spreads requests across `gatewayd` replicas.
+Use `least_outstanding_requests`, not `round_robin`: with HTTP/2 one connection
+carries many requests, so counting *connections* tells you nothing about which
+task is busy.
+
+**Layer 2 — inside.** Every `gatewayd` replica opens its own gRPC connections
+to `userd`. **The ALB cannot help here**, so each client balances for itself.
+Two ways:
+
+| | Cloud Map + client `round_robin` | ECS Service Connect |
+|---|---|---|
+| How | `dns:///` resolves all task IPs; the client spreads RPCs | an **Envoy sidecar** per task resolves Cloud Map and balances |
+| Granularity | per RPC | per request, plus retries and outlier detection |
+| Client code | the two settings from the next slides | **none** |
+| Cost | free | CPU and memory for a sidecar in every task |
+
+**This repo uses the first**, because it works anywhere — including off AWS —
+and because it makes the failure visible, which is the next slide.
+
+> **The trap:** 3 × 3 is nine paths, and a load balancer you can see covers
+> only the first hop. If you add an ALB and stop there, the inside of your
+> system is still pinned to one task.
 
 ---
 
@@ -1034,3 +1552,232 @@ make demo          # the whole flow
 - `SPEC.md` — every decision, marked verified or assumed
 
 **Thank you. Questions?**
+
+---
+
+# Appendix · Command reference
+
+## Every `make` target, grouped by what you are doing
+
+**Loop 1 — no Docker, no AWS. Fastest. Five terminals.**
+
+```sh
+make test              # 8 Go packages, fully offline
+make dev-seed          # create ./data/{user,product}.db
+make dev-userd         # :50051    |  make dev-productsd  # :50053
+make dev-orderd        # :50052    |  make dev-gatewayd   # :8080 REST
+make dev-smoke         # the gRPC flow
+make dev-rest          # the same flow over REST
+make dev-clean         # delete ./data
+```
+
+**Loop 2 — build the images.**
+
+```sh
+make images            # 4 ARM64 distroless images (one Dockerfile per storage shape)
+```
+
+**Loop 3 — real ECS tasks on your laptop.**
+
+```sh
+make local-up          # ministack :4566, jaeger :16686, prometheus :9090
+make tf-local-apply    # terraform apply -> ECS tasks, then dns + wait-ready
+make dns               # re-alias Cloud Map names (run after any deploy)
+make wait-ready        # block until orderd can reach its upstreams
+make ps                # 7 proofs that this is really ECS
+make forward           # publish ports (awsvpc tasks have no host port)
+make forward-stop      # remove the relays
+make local-down        # stop the emulator stack
+make tf-local-destroy  # terraform destroy
+```
+
+**Exercise it.**
+
+```sh
+make demo              # gRPC: browse, login, order, replay, 3 rejections
+make dev-rest          # the identical flow over REST
+make ts-demo           # the identical flow from generated TypeScript
+make api-coverage      # 10 RPCs + 9 REST routes + the 404 check -> 20/20
+make demo-load         # sustained load through orderd (needs `make forward`)
+make scale N=3         # scale userd; SCALE_SVC=productsd to pick another
+make show-guard        # terraform refusing to scale the writer
+```
+
+**Codegen.**
+
+```sh
+make proto             # buf lint + generate (Go, gateway, OpenAPI, TypeScript)
+make proto-breaking    # fail if a change would break existing clients
+```
+
+**AWS.**
+
+```sh
+make ps-aws            # the same 7 proofs, against real ECS
+make aws-ip            # every task's PUBLIC IP:port, ready for grpcurl/curl
+```
+
+---
+
+## Switching AWS accounts and profiles
+
+**This is the step people get wrong on stage** — they demo into the wrong
+account, or into a company account. Check before you apply, every time.
+
+```sh
+# 1. WHICH ACCOUNT AM I IN? Read the number out loud before applying.
+aws sts get-caller-identity
+```
+
+**Named profiles** live in `~/.aws/config`:
+
+```ini
+[profile demo]
+region = us-east-1
+
+[profile work]
+sso_start_url = https://example.awsapps.com/start
+sso_region     = us-east-1
+sso_account_id = 111122223333
+sso_role_name  = PowerUserAccess
+region         = us-east-1
+```
+
+```sh
+export AWS_PROFILE=demo          # for this shell
+aws sts get-caller-identity      # confirm it took effect
+
+aws ecs list-clusters --profile demo    # or per-command
+```
+
+**Three ways to get credentials**, cheapest-risk first:
+
+```sh
+# a) IAM Identity Center / SSO — short-lived, nothing stored. PREFERRED.
+aws sso login --profile demo
+
+# b) `aws login` — browser flow, temporary credentials, no access keys
+aws login --profile demo
+
+# c) long-lived access keys — last resort, and rotate them after the talk
+aws configure --profile demo
+```
+
+```sh
+# Region, without editing anything:
+export AWS_REGION=us-east-1
+# or per command:
+terraform apply -var aws_region=us-east-1
+```
+
+> **Before `terraform apply` in `envs/aws`:**
+>
+> 1. `aws sts get-caller-identity` — is this the demo account?
+> 2. `curl ifconfig.me` — is that IPv4 address in `operator_ingress_cidrs`?
+> 3. `terraform plan` — read it. ~1 VPC, 4 task definitions, 4 services.
+>
+> **Check the Fargate vCPU quota in your region first.** A region with quota 0
+> reports only *"your account is currently blocked"*, which looks like a
+> billing problem and is not.
+
+---
+
+## The live AWS path, start to finish
+
+```sh
+export AWS_PROFILE=demo
+aws sts get-caller-identity                      # confirm the account
+
+# 1. create the ECR repositories before pushing to them
+cd terraform/envs/aws
+terraform init
+terraform apply -target=module.deployment.module.ecr \
+  -var user_image=placeholder -var product_image=placeholder \
+  -var order_image=placeholder -var gateway_image=placeholder
+
+# 2. build + push, ARM64
+cd ../../..
+ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+REGION=${AWS_REGION:-us-east-1}
+ECR="$ACCOUNT.dkr.ecr.$REGION.amazonaws.com"
+aws ecr get-login-password --region "$REGION" \
+  | docker login --username AWS --password-stdin "$ECR"
+# (see docs/DEPLOY_AWS.md for the four build commands)
+
+# 3. the real apply
+cd terraform/envs/aws
+cat > terraform.tfvars <<EOF
+user_image    = "$ECR/userd:0.1.0"
+product_image = "$ECR/productsd:0.1.0"
+order_image   = "$ECR/orderd:0.1.0"
+gateway_image = "$ECR/gatewayd:0.1.0"
+operator_ingress_cidrs = ["YOUR.IPV4/32"]
+EOF
+terraform plan -out=tf.plan
+terraform apply tf.plan                          # ~2 min, or ~7-10 with RDS
+
+# 4. verify
+cd ../../..
+make ps-aws
+make aws-ip
+REST_BASE="http://<gatewayd-ip>:8080" bash scripts/rest-smoke.sh
+
+# 5. optional: a real database, separate DB per service (~6c for 3 hours)
+terraform -chdir=terraform/envs/aws apply -var use_rds=true
+
+# 6. BEFORE YOU LEAVE THE VENUE
+for s in userd productsd orderd gatewayd; do
+  aws ecs update-service --cluster ecom-aws --service $s --desired-count 0
+done
+sleep 75                                         # let Cloud Map deregister
+terraform -chdir=terraform/envs/aws destroy
+```
+
+---
+
+## Local AWS CLI — same commands, one extra line
+
+```sh
+export AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test
+export AWS_DEFAULT_REGION=us-east-1
+export AWS_ENDPOINT_URL=http://localhost:4566     # <- the only difference
+```
+
+```sh
+aws ecs list-clusters
+aws ecs describe-services --cluster ecom-local --services userd productsd orderd gatewayd \
+  --query 'services[].{Service:serviceName,Desired:desiredCount,Running:runningCount}' --output table
+aws ecs describe-task-definition --task-definition userd
+aws ecr describe-repositories --query 'repositories[].repositoryName'
+aws servicediscovery list-services --query 'Services[].Name'
+aws secretsmanager list-secrets --query 'SecretList[].Name'
+aws iam list-roles --query 'Roles[?starts_with(RoleName,`ecom-`)].RoleName'
+aws logs tail /ecs/ecom-local --since 5m
+```
+
+**Unset `AWS_ENDPOINT_URL` before touching real AWS**, or every command keeps
+going to your laptop and you will think nothing deployed:
+
+```sh
+unset AWS_ENDPOINT_URL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+```
+
+---
+
+## Where everything lives
+
+| What | Path |
+|---|---|
+| The contract | `proto/{user,product,order}/v1/*.proto` |
+| Codegen config | `buf.gen.yaml`, `buf.gen.ts.yaml` |
+| Order logic, both hops | `internal/order/service.go` |
+| **The load-balancing fix** | `internal/platform/grpcclient/grpcclient.go` |
+| Health + graceful shutdown | `internal/platform/grpcserver/server.go` |
+| The distroless health probe | `cmd/healthcheck/main.go` |
+| Search on two engines | `internal/product/store.go` |
+| Per-service database creation | `internal/platform/store/ensuredb.go` |
+| The whole deployment | `terraform/deployment/main.tf` |
+| Task definition + service | `terraform/modules/ecs-service/main.tf` |
+| RDS, with the cost sums | `terraform/modules/rds/main.tf` |
+| **The only differing files** | `terraform/envs/{local,aws}/provider.tf` |
+| Manual test commands | `INSTRUCTIONS.md` |

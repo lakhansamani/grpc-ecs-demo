@@ -5,8 +5,23 @@ to say, what to type, and what to do when it breaks.
 
 ## Pick your runtime first
 
-The full deck is **50 slides ≈ 55 minutes**. It does not fit in 40. Choose a
-path before you walk in and mark your copy.
+The deck is now **69 slides**: 64 of talk plus a 5-slide **command-reference
+appendix** you never present — it is there so you can flip to it mid-demo
+instead of fumbling, and so people can read it after.
+
+Of the 64, slides 40–52 are the **guided walkthrough** (Part 7): what to open,
+in what order, with the commands. Those are reference-dense on purpose. **You
+will not show all of them.** Pick a lane:
+
+| Lane | Show from Part 7 | Roughly |
+|---|---|---|
+| **Code-first audience** | A, B, C, then E, F1, F3 | 20 min |
+| **Infra-first audience** | D, E, E2, G1, G3 | 20 min |
+| **Mixed / default** | A, C, D, E, F1, F2, G1, G2 | 25 min |
+
+Everything outside Part 7 is the narrative and runs ~35 minutes. So:
+**narrative + one Part-7 lane ≈ 55-60 minutes.** For a 40-minute slot, use the
+cut list below and show only E, F1 and G1.
 
 Six slides are deliberately fast: `[ASK]` slides are audience questions (20–30
 seconds, but **do not advance until someone answers**) and `[BEAT]` slides are
@@ -18,13 +33,18 @@ single lines you let land (10 seconds).
 | **40 min** | Core | 3, 13, 25, 31, 39 · and cut `make dev-rest` from Demo 2 |
 | **30 min** | Spine | Also 15, 19, 24, 34, 36 · and Demo 3 (describe it) |
 
-**Never drop:** 2 (the promise), 9 (use-case diagram), 10 (the boundary test),
-16+17 (the streaming ASK), 27 (no price in the request), 33 (every AWS
-component), 38 (one pipeline), 40 (Demo 1), 43–47 (the payoff), 49 (the closing
-line).
+**Never drop:** the promise, the use-case diagram, the boundary test, the
+streaming ASK + reveal, "no price in the request", the every-AWS-component
+table, the one-pipeline `diff`, walkthrough E, and the whole `pick_first`
+payoff (setup → ASK → 120/0/0 → the fix) plus the closing line.
 
-**The spine, if you only get 20 minutes:** 2 → 9 → 10 → 27 → 33 → 38 → 40 →
-43 → 44 → 45 → 47 → 49.
+**The 20-minute spine:** the promise → use-case diagram → three services →
+no price in the request → every AWS component → the `diff` → walkthrough E →
+the promise revisited → ASK → 120/0/0 → the fix → green dashboards.
+
+> Slide numbers shifted when the walkthroughs and the health-check slides went
+> in. The per-slide sections below are keyed by **title**, so match on the
+> title, not the number.
 
 Timings below are for the **55-minute** run.
 
