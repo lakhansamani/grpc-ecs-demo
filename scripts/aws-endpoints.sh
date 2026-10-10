@@ -12,6 +12,16 @@
 # certificate, but you get N changing addresses instead of one stable name.
 set -uo pipefail
 
+# --env prints ONLY shell assignments, so the addresses can be loaded straight
+# into the current shell instead of copied by hand:
+#
+#   eval "$(make -s aws-env)"
+#
+# Hand-copying four IPs is exactly the kind of thing that goes wrong live, and
+# they change on every deploy.
+ENV_ONLY=0
+if [ "${1:-}" = "--env" ]; then ENV_ONLY=1; shift; fi
+
 CLUSTER="${CLUSTER:-ecom-aws}"
 if [ "$#" -gt 0 ]; then
   SERVICES=("$@")
@@ -21,8 +31,18 @@ fi
 
 command -v aws >/dev/null || { echo "aws CLI not found" >&2; exit 1; }
 
-printf '%-11s %-5s %-16s %s\n' SERVICE PORT "PUBLIC IP" "TRY THIS"
-printf '%-11s %-5s %-16s %s\n' ------- ----- --------- --------
+# Remembered per service so the env block can be printed at the end. When a
+# service has several tasks, the FIRST one wins - the table above still shows
+# them all, which is the point when you have scaled out.
+#
+# Plain variables rather than an associative array: macOS ships bash 3.2, which
+# has no `declare -A`, and this has to run on the speaker's laptop.
+IP_userd=""; IP_productsd=""; IP_orderd=""; IP_gatewayd=""
+
+if [ "$ENV_ONLY" -eq 0 ]; then
+  printf '%-11s %-5s %-16s %s\n' SERVICE PORT "PUBLIC IP" "TRY THIS"
+  printf '%-11s %-5s %-16s %s\n' ------- ----- --------- --------
+fi
 
 port_for() {
   case "$1" in
@@ -51,14 +71,48 @@ for svc in "${SERVICES[@]}"; do
          --query 'NetworkInterfaces[0].Association.PublicIp' --output text 2>/dev/null)
     if [ "$ip" = "None" ] || [ -z "$ip" ]; then ip="(no public IP)"; fi
 
-    if [ "$svc" = "gatewayd" ]; then
-      hint="curl http://$ip:$port/healthz"
-    else
-      hint="grpcurl -plaintext $ip:$port list"
+    if [ "$ip" != "(no public IP)" ]; then
+      case "$svc" in
+        userd)     [ -z "$IP_userd" ]     && IP_userd="$ip" ;;
+        productsd) [ -z "$IP_productsd" ] && IP_productsd="$ip" ;;
+        orderd)    [ -z "$IP_orderd" ]    && IP_orderd="$ip" ;;
+        gatewayd)  [ -z "$IP_gatewayd" ]  && IP_gatewayd="$ip" ;;
+      esac
     fi
-    printf '%-11s %-5s %-16s %s\n' "$svc" "$port" "$ip" "$hint"
+
+    if [ "$ENV_ONLY" -eq 0 ]; then
+      if [ "$svc" = "gatewayd" ]; then
+        hint="curl http://$ip:$port/healthz"
+      else
+        hint="grpcurl -plaintext $ip:$port list"
+      fi
+      printf '%-11s %-5s %-16s %s\n' "$svc" "$port" "$ip" "$hint"
+    fi
   done
 done
+
+# The copy-paste (or eval-able) block. Variable names match INSTRUCTIONS.md.
+emit_env() {
+  [ -n "$IP_userd" ]     && echo "export U=$IP_userd:50051"
+  [ -n "$IP_orderd" ]    && echo "export O=$IP_orderd:50052"
+  [ -n "$IP_productsd" ] && echo "export P=$IP_productsd:50053"
+  if [ -n "$IP_gatewayd" ]; then
+    echo "export BASE=http://$IP_gatewayd:8080"
+    echo "export REST_BASE=http://$IP_gatewayd:8080"
+  fi
+  return 0
+}
+
+if [ "$ENV_ONLY" -eq 1 ]; then
+  emit_env
+  exit 0
+fi
+
+echo
+echo "Load these into your shell:   eval \"\$(make -s aws-env)\""
+echo
+emit_env | sed 's/^/  /'
+
 
 cat <<'NOTE'
 

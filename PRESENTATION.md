@@ -1225,13 +1225,14 @@ userd       50051 54.x.x.x     grpcurl -plaintext 54.x.x.x:50051 list
 gatewayd    8080  18.x.x.x     curl http://18.x.x.x:8080/healthz
 ```
 
-Then **every command from F1 and F2 works unchanged** — just repoint the
-variables:
+**Do not retype those.** Load them, and every command from F1 and F2 works
+unchanged:
 
 ```sh
-U=54.x.x.x:50051; O=44.x.x.x:50052; P=3.x.x.x:50053
-BASE=http://18.x.x.x:8080
-REST_BASE="$BASE" bash scripts/rest-smoke.sh
+eval "$(make -s aws-env)"      # sets U, O, P, BASE, REST_BASE from the live tasks
+
+grpcurl -plaintext $P list
+bash scripts/rest-smoke.sh
 ```
 
 **The honest cost of skipping the ALB:** `awsvpc` gives every task its own ENI
@@ -1562,6 +1563,8 @@ make wire-size        # protobuf vs JSON, measured
 make tf-aws-apply      # init -> ECR repos -> build+push -> apply -> wait -> print IPs
 make ps-aws            # the same 7 proofs, against real ECS
 make aws-ip            # every task's PUBLIC IP:port, ready for grpcurl/curl
+eval "$(make -s aws-env)"    # load U/O/P/BASE/REST_BASE from the live tasks
+eval "$(make -s local-env)"  # the same variables, pointed at localhost
 make tf-aws-destroy    # drain -> destroy -> VERIFY nothing is still billing
 ```
 

@@ -139,14 +139,24 @@ make forward
 That gives you `localhost:50051` (userd), `:50052` (orderd), `:50053`
 (productsd) and `:8080` (gatewayd REST).
 
-Convenience variables used throughout:
+**Load the addresses into your shell rather than typing them.** One command,
+and every example below works as written:
 
 ```sh
-U=localhost:50051     # userd
-O=localhost:50052     # orderd
-P=localhost:50053     # productsd
-BASE=http://localhost:8080
+eval "$(make -s local-env)"     # local
+eval "$(make -s aws-env)"       # real AWS - reads the live task IPs
 ```
+
+Either way you get:
+
+```sh
+U=...:50051     # userd        BASE=http://...:8080   # gatewayd REST
+O=...:50052     # orderd       REST_BASE=$BASE        # used by scripts/rest-smoke.sh
+P=...:50053     # productsd
+```
+
+> **Re-run the `aws-env` one after any deploy or scale event.** `awsvpc` gives
+> each task its own ENI, so the IPs move when a task is replaced.
 
 > **No `.proto` files needed.** Every service registers gRPC **server
 > reflection**, so `grpcurl` and Postman discover the API from the server
@@ -400,17 +410,27 @@ orderd      50052 44.x.x.x         grpcurl -plaintext 44.x.x.x:50052 list
 gatewayd    8080  18.x.x.x         curl http://18.x.x.x:8080/healthz
 ```
 
-Then point the same variables at them and every command above works unchanged:
+**Do not copy those by hand.** Load them instead — it reads the live task IPs
+and sets the same variable names used above:
 
 ```sh
-U=54.x.x.x:50051
-O=44.x.x.x:50052
-P=3.x.x.x:50053
-BASE=http://18.x.x.x:8080
+eval "$(make -s aws-env)"
+```
 
+```
+export U=35.172.110.136:50051
+export O=44.213.133.245:50052
+export P=98.80.192.198:50053
+export BASE=http://34.201.31.110:8080
+export REST_BASE=http://34.201.31.110:8080
+```
+
+Now **every command in §3 and §4 works unchanged**:
+
+```sh
 grpcurl -plaintext $P list
 curl -s "$BASE/v1/products:search?query=cancelling" | jq -r '.products[].title'
-REST_BASE="$BASE" bash scripts/rest-smoke.sh
+bash scripts/rest-smoke.sh          # picks up REST_BASE on its own
 ```
 
 **If it hangs**, it is almost always the security group:

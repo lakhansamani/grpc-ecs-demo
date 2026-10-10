@@ -9,7 +9,7 @@ LOCAL_AWS := AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGIO
              aws --endpoint-url http://localhost:4566
 
 .PHONY: local-up local-down tf-local-apply tf-local-destroy dns demo demo-load wait-ready \
-        scale test ps ps-aws aws-ip tf-aws-apply tf-aws-destroy \
+        scale test ps ps-aws aws-ip aws-env local-env tf-aws-apply tf-aws-destroy \
         forward forward-stop images images-push \
         api-coverage show-guard wire-size \
         demo-lb demo-lb-before demo-lb-after lb-report \
@@ -148,6 +148,27 @@ tf-aws-destroy:
 # task is replaced - re-run this after a deploy or a scale event.
 aws-ip:
 	@bash scripts/aws-endpoints.sh
+
+# Just the shell assignments, so the addresses go straight into your shell:
+#
+#   eval "$$(make -s aws-env)"
+#
+# Then every grpcurl/curl command in INSTRUCTIONS.md works as written. Re-run
+# it after any deploy or scale event - awsvpc gives each task its own ENI, so
+# the IPs move.
+aws-env:
+	@bash scripts/aws-endpoints.sh --env
+
+# The same variables for the LOCAL stack, so every command in INSTRUCTIONS.md
+# works in both places without editing anything:
+#
+#   make forward && eval "$$(make -s local-env)"
+local-env:
+	@echo "export U=localhost:50051"
+	@echo "export O=localhost:50052"
+	@echo "export P=localhost:50053"
+	@echo "export BASE=http://localhost:8080"
+	@echo "export REST_BASE=http://localhost:8080"
 
 test:
 	go test ./...
