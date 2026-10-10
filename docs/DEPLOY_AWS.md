@@ -104,6 +104,44 @@ terraform apply \
   -var order_image=placeholder -var gateway_image=placeholder
 ```
 
+**Three things about that command that look odd and are not:**
+
+1. **The four `placeholder` values are required**, even though this apply does
+   not create any service. Terraform validates every root input variable
+   *before* it narrows down to `-target`, and `user_image`, `product_image`,
+   `order_image` and `gateway_image` have no defaults. Omit them and you get
+   `No value for required variable`. Nothing is created from them here.
+
+2. **Terraform will warn that "resource targeting is in effect" and that
+   `-target` is not for routine use.** That warning is correct and this is one
+   of the situations it means: you cannot push an image to a repository that
+   does not exist, and you cannot start a service from an image that has not
+   been pushed. Chicken and egg, broken once, at the start.
+
+3. **`module.deployment.module.ecr` has no index**, even though the module
+   creates four repositories. The `for_each` is on the resource inside the
+   module, not on the module block, so the un-indexed address targets all four.
+
+<details>
+<summary>The alternative, and why not</summary>
+
+You can skip the targeted apply, run one full `terraform apply`, then push and
+force a redeployment:
+
+```sh
+terraform apply -var user_image=... # (etc, with real URIs that do not exist yet)
+make images-push
+for s in userd productsd orderd gatewayd; do
+  aws ecs update-service --cluster ecom-aws --service $s --force-new-deployment
+done
+```
+
+It works, but between the apply and the push every task sits in a pull-image
+crash loop — which is a confusing thing to have on screen, and a confusing
+state to debug if anything else is also wrong. The two-step version is boring,
+and boring is what you want the day before a talk.
+</details>
+
 ---
 
 ## 3 · Build and push, ARM64
